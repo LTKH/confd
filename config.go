@@ -10,11 +10,11 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-
+	"log"
+	
 	"github.com/BurntSushi/toml"
-	"github.com/kelseyhightower/confd/backends"
-	"github.com/kelseyhightower/confd/log"
-	"github.com/kelseyhightower/confd/resource/template"
+	"github.com/ltkh/confd/internal/backends"
+	"github.com/ltkh/confd/internal/resource/template"
 )
 
 type TemplateConfig = template.Config
@@ -24,15 +24,20 @@ type BackendsConfig = backends.Config
 type Config struct {
 	TemplateConfig
 	BackendsConfig
-	Interval      int    `toml:"interval"`
-	SecretKeyring string `toml:"secret_keyring"`
-	SRVDomain     string `toml:"srv_domain"`
-	SRVRecord     string `toml:"srv_record"`
-	LogLevel      string `toml:"log-level"`
-	Watch         bool   `toml:"watch"`
-	PrintVersion  bool
-	ConfigFile    string
-	OneTime       bool
+	Interval         int    `toml:"interval"`
+	SecretKeyring    string `toml:"secret_keyring"`
+	SRVDomain        string `toml:"srv_domain"`
+	SRVRecord        string `toml:"srv_record"`
+	Watch            bool   `toml:"watch"`
+	PrintVersion     bool
+	ConfigFile       string
+	OneTime          bool
+	LogFile          string `toml:"log-file"`
+	LogLevel         string `toml:"log-level"`
+	LogMaxSize       int    `toml:"log-max-size"`
+	LogMaxBackups    int    `toml:"log-max-backups"`
+	LogMaxAge        int    `toml:"log-max-age"`
+	LogCompress      bool   `toml:"log-compress"`
 }
 
 var config Config
@@ -44,13 +49,13 @@ func init() {
 	flag.StringVar(&config.ClientCaKeys, "client-ca-keys", "", "client ca keys")
 	flag.StringVar(&config.ClientCert, "client-cert", "", "the client cert")
 	flag.StringVar(&config.ClientKey, "client-key", "", "the client key")
-        flag.BoolVar(&config.ClientInsecure, "client-insecure", false, "Allow connections to SSL sites without certs (only used with -backend=etcd)")
 	flag.StringVar(&config.ConfDir, "confdir", "/etc/confd", "confd conf directory")
 	flag.StringVar(&config.ConfigFile, "config-file", "/etc/confd/confd.toml", "the confd config file")
 	flag.Var(&config.YAMLFile, "file", "the YAML file to watch for changes (only used with -backend=file)")
 	flag.StringVar(&config.Filter, "filter", "*", "files filter (only used with -backend=file)")
 	flag.IntVar(&config.Interval, "interval", 600, "backend polling interval")
 	flag.BoolVar(&config.KeepStageFile, "keep-stage-file", false, "keep staged files")
+	flag.StringVar(&config.LogFile, "log-file", "", "the confd log file")
 	flag.StringVar(&config.LogLevel, "log-level", "", "level which confd should log messages")
 	flag.Var(&config.BackendNodes, "node", "list of backend nodes")
 	flag.BoolVar(&config.Noop, "noop", false, "only show pending changes")
@@ -83,9 +88,9 @@ func init() {
 func initConfig() error {
 	_, err := os.Stat(config.ConfigFile)
 	if os.IsNotExist(err) {
-		log.Debug("Skipping confd config file.")
+		log.Print("Skipping confd config file.")
 	} else {
-		log.Debug("Loading " + config.ConfigFile)
+		log.Print("Loading " + config.ConfigFile)
 		configBytes, err := ioutil.ReadFile(config.ConfigFile)
 		if err != nil {
 			return err
@@ -103,17 +108,17 @@ func initConfig() error {
 	if config.SecretKeyring != "" {
 		kr, err := os.Open(config.SecretKeyring)
 		if err != nil {
-			log.Fatal(err.Error())
+			log.Print(err.Error())
 		}
 		defer kr.Close()
 		config.PGPPrivateKey, err = ioutil.ReadAll(kr)
 		if err != nil {
-			log.Fatal(err.Error())
+			log.Print(err.Error())
 		}
 	}
 
 	if config.LogLevel != "" {
-		log.SetLevel(config.LogLevel)
+		//log.SetLevel(config.LogLevel)
 	}
 
 	if config.SRVDomain != "" && config.SRVRecord == "" {
@@ -122,7 +127,7 @@ func initConfig() error {
 
 	// Update BackendNodes from SRV records.
 	if config.Backend != "env" && config.SRVRecord != "" {
-		log.Info("SRV record set to " + config.SRVRecord)
+		log.Print("SRV record set to " + config.SRVRecord)
 		srvNodes, err := getBackendNodesFromSRV(config.SRVRecord)
 		if err != nil {
 			return errors.New("Cannot get nodes from SRV records " + err.Error())
@@ -141,8 +146,6 @@ func initConfig() error {
 	}
 	if len(config.BackendNodes) == 0 {
 		switch config.Backend {
-		case "consul":
-			config.BackendNodes = []string{"127.0.0.1:8500"}
 		case "etcd":
 			peerstr := os.Getenv("ETCDCTL_PEERS")
 			if len(peerstr) > 0 {
@@ -152,16 +155,10 @@ func initConfig() error {
 			}
 		case "etcdv3":
 			config.BackendNodes = []string{"127.0.0.1:2379"}
-		case "redis":
-			config.BackendNodes = []string{"127.0.0.1:6379"}
-		case "vault":
-			config.BackendNodes = []string{"http://127.0.0.1:8200"}
-		case "zookeeper":
-			config.BackendNodes = []string{"127.0.0.1:2181"}
 		}
 	}
 	// Initialize the storage client
-	log.Info("Backend set to " + config.Backend)
+	log.Print("Backend set to " + config.Backend)
 
 	if config.Watch {
 		unsupportedBackends := map[string]bool{
@@ -170,14 +167,11 @@ func initConfig() error {
 		}
 
 		if unsupportedBackends[config.Backend] {
-			log.Info(fmt.Sprintf("Watch is not supported for backend %s. Exiting...", config.Backend))
+			log.Print(fmt.Sprintf("Watch is not supported for backend %s. Exiting...", config.Backend))
 			os.Exit(1)
 		}
 	}
 
-	if config.Backend == "dynamodb" && config.Table == "" {
-		return errors.New("No DynamoDB table configured")
-	}
 	config.ConfigDir = filepath.Join(config.ConfDir, "conf.d")
 	config.TemplateDir = filepath.Join(config.ConfDir, "templates")
 	return nil
