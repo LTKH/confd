@@ -1,89 +1,129 @@
 package main
 
 import (
-	"flag"
-	"fmt"
+	"time"
+	"log"
 	"os"
 	"os/signal"
-	"runtime"
 	"syscall"
-	"log"
-
+	"runtime"
+	"flag"
 	"gopkg.in/natefinch/lumberjack.v2"
-	"github.com/ltkh/confd/internal/backends"
-	"github.com/ltkh/confd/internal/resource/template"
+	"github.com/ltkh/confd/backends"
+	"github.com/ltkh/confd/internal/config"
+	"github.com/ltkh/confd/internal/template"
 )
 
 func main() {
+
+  	//limits the number of operating system threads
+	runtime.GOMAXPROCS(runtime.NumCPU())
+
+	//command-line flag parsing
+	cfFile := flag.String("config", "", "config file")
+	cfgDir := flag.String("confdir", "", "config dir") 
+	lgFile := flag.String("logfile", "", "log file") 
+	flTest := flag.String("test", "", "config test") 
 	flag.Parse()
-	if config.PrintVersion {
-		fmt.Printf("confd %s (Git SHA: %s, Go Version: %s)\n", Version, GitSHA, runtime.Version())
-		os.Exit(0)
+
+	//loading configuration file
+	cfg, err := config.New(*cfFile)
+	if err != nil {
+		log.Fatalf("[error] %v", err)
 	}
 
-	if err := initConfig(); err != nil {
-		log.Fatal(err.Error())
-	}
-
-	if config.LogFile != "" {
-		if config.LogMaxSize == 0 {
-			config.LogMaxSize = 1
+	if *lgFile != "" {
+		if cfg.Server.Log_max_size == 0 {
+			cfg.Server.Log_max_size = 1
 		}
-		if config.LogMaxBackups == 0 {
-			config.LogMaxBackups = 3
+		if cfg.Server.Log_max_backups == 0 {
+			cfg.Server.Log_max_backups = 3
 		}
-		if config.LogMaxAge == 0 {
-			config.LogMaxAge = 28
+		if cfg.Server.Log_max_age == 0 {
+			cfg.Server.Log_max_age = 28
 		}
 		log.SetOutput(&lumberjack.Logger{
-			Filename:   config.LogFile,
-			MaxSize:    config.LogMaxSize,    // megabytes after which new file is created
-			MaxBackups: config.LogMaxBackups, // number of backups
-			MaxAge:     config.LogMaxAge,     // days
-			Compress:   config.LogCompress,   // using gzip
+			Filename:   *lgFile,
+			MaxSize:    cfg.Server.Log_max_size,    // megabytes after which new file is created
+			MaxBackups: cfg.Server.Log_max_backups, // number of backups
+			MaxAge:     cfg.Server.Log_max_age,     // days
+			Compress:   cfg.Server.Log_compress,    // using gzip
 		})
 	}
 
-	log.Print("Starting confd")
-
-	storeClient, err := backends.New(config.BackendsConfig)
-	if err != nil {
-		log.Print(err.Error())
-	}
-
-	config.TemplateConfig.StoreClient = storeClient
-	if config.OneTime {
-		if err := template.Process(config.TemplateConfig); err != nil {
-			log.Print(err.Error())
-		}
+	//program completion signal processing
+	c := make(chan os.Signal, 2)
+	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		<- c
+		log.Print("[info] confd stopped")
 		os.Exit(0)
+	}()
+
+	//checking the status of tasks
+	if cfg.Server.Check_enabled {
+
+		go func(cfg *config.Config, clnt db.DbClient) {
+
+			if cfg.Server.Check_interval == 0 {
+				cfg.Server.Check_interval = 600
+			}
+
+			for {
+
+				//geting tasks from database
+				tasks, err := clnt.LoadTasks()
+				if err != nil {
+					log.Printf("[error] %v", err)
+					continue
+				}
+
+				for _, task := range tasks {
+					time.Sleep(cfg.Server.Check_delay * time.Second)
+
+					//task.Updated = time.Now().UTC().Unix()
+					issue, err := template.UpdateTaskStatus(task, cfg, clnt)
+					if err != nil {
+						log.Printf("[error] task update id %s: %v", task.Task_id, err)
+						continue
+					}
+
+					if issue.Fields.Status.Id != task.Status_id {
+						log.Printf("[info] task status updated: %s", task.Task_self)
+					}
+
+					if task.Updated + cfg.Server.Check_resolve < time.Now().UTC().Unix() {
+						for _, s := range cfg.Server.Check_status {
+							if issue.Fields.Status.Id == s {
+								if err := clnt.DeleteTask(task.Group_id); err != nil {
+									log.Printf("[error] task delete id %s: %v", task.Task_id, err)
+									continue
+								}
+								log.Printf("[info] task is removed from the database: %v", task.Task_self)
+							}
+						}
+					}
+
+				}
+
+				time.Sleep(cfg.Server.Check_interval * time.Second)
+			}
+		}(&cfg, client)
 	}
 
-	stopChan := make(chan bool)
-	doneChan := make(chan bool)
-	errChan := make(chan error, 10)
+	log.Print("[info] confd running")
 
-	var processor template.Processor
-	switch {
-	case config.Watch:
-		processor = template.WatchProcessor(config.TemplateConfig, stopChan, doneChan, errChan)
-	default:
-		processor = template.IntervalProcessor(config.TemplateConfig, stopChan, doneChan, errChan, config.Interval)
+	if cfg.Server.Alerts_interval == 0 {
+		cfg.Server.Alerts_interval = 600
 	}
 
-	go processor.Process()
-
-	signalChan := make(chan os.Signal, 1)
-	signal.Notify(signalChan, syscall.SIGINT, syscall.SIGTERM)
+	//daemon mode
 	for {
-		select {
-		case err := <-errChan:
-			log.Print(err.Error())
-		case s := <-signalChan:
-			log.Print(fmt.Sprintf("Captured %v. Exiting...", s))
-			close(doneChan)
-		case <-doneChan:
-			os.Exit(0)
+
+		if err := template.Process(&cfg, client, flTest); err != nil {
+			log.Printf("[error] %v", err)
 		}
+
+		time.Sleep(cfg.Server.Alerts_interval * time.Second)
 	}
 }
