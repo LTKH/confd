@@ -1,6 +1,0 @@
-[template]
-src = "telegraf.tmpl"
-dest = "/tmp/telegraf.conf"
-keys = ["/nginx"]
-check_cmd = "/usr/sbin/nginx -t -c {{ .src }}"
-reload_cmd = "/usr/sbin/service nginx restart"

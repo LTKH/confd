@@ -4,9 +4,6 @@ import (
 	"fmt"
 	"reflect"
 	"regexp"
-	"strings"
-	"sort"
-	"net"
 	"strconv"
 )
 
@@ -72,44 +69,25 @@ func regexReplaceAll(re, pl, s string) (string, error) {
 	return compiled.ReplaceAllString(s, pl), nil
 }
 
-func LookupIP(data string) []string {
-	ips, err := net.LookupIP(data)
-	if err != nil {
-		return nil
-	}
-	// "Cast" IPs into strings and sort the array
-	ipStrings := make([]string, len(ips))
-
-	for i, ip := range ips {
-		ipStrings[i] = ip.String()
-	}
-	sort.Strings(ipStrings)
-	return ipStrings
-}
-
-
-func LookupIPV6(data string) []string {
-	var addresses []string
-	for _, ip := range LookupIP(data) {
-		if strings.Contains(ip, ":") {
-			addresses = append(addresses, ip)
-		}
-	}
-	return addresses
-}
-
-func LookupIPV4(data string) []string {
-	var addresses []string
-	for _, ip := range LookupIP(data) {
-		if strings.Contains(ip, ".") {
-			addresses = append(addresses, ip)
-		}
-	}
-	return addresses
-}
-
 func strQuote(data string) (string, error) {
 	s := strconv.Quote(data)
 	return s[1:len(s)-1], nil
+}
+
+func createMap() map[string]interface{} {
+	return map[string]interface{}{}
+}
+
+func pushToMap(mp map[string]interface{}, k string, vl interface{}) map[string]interface{} {
+	mp[k] = vl
+	return mp
+}
+
+func createArray() []interface{} {
+	return []interface{}{}
+}
+
+func pushToArray(arr []interface{}, vl interface{}) []interface{} {
+	return append(arr, vl)
 }
 

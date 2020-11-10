@@ -1,13 +1,5 @@
-# github.com/go-sql-driver/mysql v1.5.0
-## explicit
-github.com/go-sql-driver/mysql
-# github.com/ltkh/alertstrap v1.5.1
-## explicit
-github.com/ltkh/alertstrap/internal/cache
-github.com/ltkh/alertstrap/internal/config
-github.com/ltkh/alertstrap/internal/db
-github.com/ltkh/alertstrap/internal/db/mysql
 # github.com/naoina/go-stringutil v0.1.0
+## explicit
 github.com/naoina/go-stringutil
 # github.com/naoina/toml v0.1.1
 ## explicit

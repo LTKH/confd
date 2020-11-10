@@ -1,53 +1,88 @@
 package main
 
 import (
-	"time"
 	"log"
+	"time"
 	"os"
 	"os/signal"
 	"syscall"
 	"runtime"
 	"flag"
+	"sync"
+	"fmt"
+	"os/exec"
+	"github.com/naoina/toml"
 	"gopkg.in/natefinch/lumberjack.v2"
-	"github.com/ltkh/confd/backends"
-	"github.com/ltkh/confd/internal/config"
 	"github.com/ltkh/confd/internal/template"
 )
 
+type Config struct {
+	Server struct {
+		Interval         time.Duration  `toml:"interval"`
+		CheckCmd         string         `toml:"check_cmd"`
+		ReloadCmd        string         `toml:"reload_cmd"`
+		LogMaxSize       int            `toml:"log_max_size"`
+	    LogMaxBackups    int            `toml:"log_max_backups"`
+	    LogMaxAge        int            `toml:"log_max_age"`
+	    LogCompress      bool           `toml:"log_compress"`
+	}
+	Template       []template.HTTPTemplate
+}
+
+func checkCmd() error {
+	/*
+	var cmdBuffer bytes.Buffer
+	data := make(map[string]string)
+	data["src"] = t.StageFile.Name()
+	tmpl, err := template.New("checkcmd").Parse(t.CheckCmd)
+	if err != nil {
+		return err
+	}
+	if err := tmpl.Execute(&cmdBuffer, data); err != nil {
+		return err
+	}
+	return runCommand(cmdBuffer.String())
+	*/
+	return nil
+}
+
+func runCommand(check, cmd string) error {
+	log.Printf("[info] running %s", cmd)
+	var c *exec.Cmd
+	if runtime.GOOS == "windows" {
+		c = exec.Command("cmd", "/C", cmd)
+	} else {
+		c = exec.Command("/bin/sh", "-c", cmd)
+	}
+
+	output, err := c.CombinedOutput()
+	if err != nil {
+		log.Printf("[error] %q", string(output))
+		return err
+	}
+	log.Printf("[info] %q", string(output))
+	return nil
+}
+
 func main() {
 
-  	//limits the number of operating system threads
+	//limits the number of operating system threads
 	runtime.GOMAXPROCS(runtime.NumCPU())
 
 	//command-line flag parsing
 	cfFile := flag.String("config", "", "config file")
-	cfgDir := flag.String("confdir", "", "config dir") 
-	lgFile := flag.String("logfile", "", "log file") 
-	flTest := flag.String("test", "", "config test") 
+	lgFile := flag.String("logfile", "", "log file")
+	plugin := flag.String("plugin", "", "plugin mode")
 	flag.Parse()
 
-	//loading configuration file
-	cfg, err := config.New(*cfFile)
-	if err != nil {
-		log.Fatalf("[error] %v", err)
-	}
-
-	if *lgFile != "" {
-		if cfg.Server.Log_max_size == 0 {
-			cfg.Server.Log_max_size = 1
-		}
-		if cfg.Server.Log_max_backups == 0 {
-			cfg.Server.Log_max_backups = 3
-		}
-		if cfg.Server.Log_max_age == 0 {
-			cfg.Server.Log_max_age = 28
-		}
+	//logging settings
+	if *lgFile != "" || *plugin == "true"{
 		log.SetOutput(&lumberjack.Logger{
 			Filename:   *lgFile,
-			MaxSize:    cfg.Server.Log_max_size,    // megabytes after which new file is created
-			MaxBackups: cfg.Server.Log_max_backups, // number of backups
-			MaxAge:     cfg.Server.Log_max_age,     // days
-			Compress:   cfg.Server.Log_compress,    // using gzip
+			MaxSize:    1,      // megabytes after which new file is created
+			MaxBackups: 3,      // number of backups
+			MaxAge:     10,     // days
+			Compress:   true,   // using gzip
 		})
 	}
 
@@ -60,70 +95,69 @@ func main() {
 		os.Exit(0)
 	}()
 
-	//checking the status of tasks
-	if cfg.Server.Check_enabled {
+	log.Print("[info] confd started -_-")
 
-		go func(cfg *config.Config, clnt db.DbClient) {
-
-			if cfg.Server.Check_interval == 0 {
-				cfg.Server.Check_interval = 600
-			}
-
-			for {
-
-				//geting tasks from database
-				tasks, err := clnt.LoadTasks()
-				if err != nil {
-					log.Printf("[error] %v", err)
-					continue
-				}
-
-				for _, task := range tasks {
-					time.Sleep(cfg.Server.Check_delay * time.Second)
-
-					//task.Updated = time.Now().UTC().Unix()
-					issue, err := template.UpdateTaskStatus(task, cfg, clnt)
-					if err != nil {
-						log.Printf("[error] task update id %s: %v", task.Task_id, err)
-						continue
-					}
-
-					if issue.Fields.Status.Id != task.Status_id {
-						log.Printf("[info] task status updated: %s", task.Task_self)
-					}
-
-					if task.Updated + cfg.Server.Check_resolve < time.Now().UTC().Unix() {
-						for _, s := range cfg.Server.Check_status {
-							if issue.Fields.Status.Id == s {
-								if err := clnt.DeleteTask(task.Group_id); err != nil {
-									log.Printf("[error] task delete id %s: %v", task.Task_id, err)
-									continue
-								}
-								log.Printf("[info] task is removed from the database: %v", task.Task_self)
-							}
-						}
-					}
-
-				}
-
-				time.Sleep(cfg.Server.Check_interval * time.Second)
-			}
-		}(&cfg, client)
-	}
-
-	log.Print("[info] confd running")
-
-	if cfg.Server.Alerts_interval == 0 {
-		cfg.Server.Alerts_interval = 600
-	}
-
-	//daemon mode
+    //daemon mode
 	for {
 
-		if err := template.Process(&cfg, client, flTest); err != nil {
-			log.Printf("[error] %v", err)
+		//loading configuration file
+		f, err := os.Open(*cfFile)
+		if err != nil {
+			log.Fatalf("[error] %v", err)
+		}
+		defer f.Close()
+		
+		var cfg Config
+		if err := toml.NewDecoder(f).Decode(&cfg); err != nil {
+			log.Fatalf("[error] %v", err)
 		}
 
-		time.Sleep(cfg.Server.Alerts_interval * time.Second)
+		var wg sync.WaitGroup
+		var rl bool
+
+		for _, t := range cfg.Template {
+			wg.Add(1)
+			go func(tmpl template.HTTPTemplate) {
+				defer wg.Done()
+
+				tmp := template.New(tmpl)
+
+				reload, err := tmp.GatherURL()
+				if err != nil {
+					log.Printf("[error] %v", err)
+					if *plugin == "true" {
+						fmt.Printf("templates,src=%s,dest=%s success=0,updated=0\n", tmpl.Src, tmpl.Dest)
+					}
+					return
+				}
+
+				if reload {
+					rl = true
+					if *plugin == "true" {
+						fmt.Printf("templates,src=%s,dest=%s success=1,updated=1\n", tmpl.Src, tmpl.Dest)
+					}
+					if tmpl.ReloadCmd != "" {
+						runCommand(tmpl.CheckCmd, tmpl.ReloadCmd)
+					}
+				} else {
+					if *plugin == "true" {
+						fmt.Printf("templates,src=%s,dest=%s success=1,updated=0\n", tmpl.Src, tmpl.Dest)
+					}
+				}
+				
+			}(t)
+		}
+
+		wg.Wait()
+
+		if rl {
+            if cfg.Server.ReloadCmd != "" {
+				runCommand(cfg.Server.CheckCmd, cfg.Server.ReloadCmd)
+			}
+		}
+
+		time.Sleep(cfg.Server.Interval * time.Second)
 	}
+
 }
+
