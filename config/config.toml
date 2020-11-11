@@ -1,6 +1,3 @@
-[server]
-interval = 10
-
 [[template]]
 urls = ["http://localhost:8080/localhost"]
 src = "config/inputs.tmpl"

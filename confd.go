@@ -18,13 +18,8 @@ import (
 
 type Config struct {
 	Server struct {
-		Interval         time.Duration  `toml:"interval"`
 		CheckCmd         string         `toml:"check_cmd"`
 		ReloadCmd        string         `toml:"reload_cmd"`
-		LogMaxSize       int            `toml:"log_max_size"`
-	    LogMaxBackups    int            `toml:"log_max_backups"`
-	    LogMaxAge        int            `toml:"log_max_age"`
-	    LogCompress      bool           `toml:"log_compress"`
 	}
 	Template       []template.HTTPTemplate
 }
@@ -70,19 +65,24 @@ func main() {
 	runtime.GOMAXPROCS(runtime.NumCPU())
 
 	//command-line flag parsing
-	cfFile := flag.String("config", "", "config file")
-	lgFile := flag.String("logfile", "", "log file")
-	plugin := flag.String("plugin", "", "plugin mode")
+	cfFile          := flag.String("config", "", "config file")
+	lgFile          := flag.String("logfile", "", "log file")
+	plugin          := flag.Bool("plugin", false, "plugin mode")
+	interval        := flag.Int("interval", 30, "interval")
+	log_max_size    := flag.Int("log_max_size", 1, "log max size") 
+	log_max_backups := flag.Int("log_max_backups", 3, "log max backups")
+	log_max_age     := flag.Int("log_max_age", 10, "log max age")
+	log_compress    := flag.Bool("log_compress", true, "log compress")
 	flag.Parse()
 
 	//logging settings
-	if *lgFile != "" || *plugin == "true"{
+	if *lgFile != "" || *plugin {
 		log.SetOutput(&lumberjack.Logger{
 			Filename:   *lgFile,
-			MaxSize:    1,      // megabytes after which new file is created
-			MaxBackups: 3,      // number of backups
-			MaxAge:     10,     // days
-			Compress:   true,   // using gzip
+			MaxSize:    *log_max_size,    // megabytes after which new file is created
+			MaxBackups: *log_max_backups, // number of backups
+			MaxAge:     *log_max_age,     // days
+			Compress:   *log_compress,    // using gzip
 		})
 	}
 
@@ -125,26 +125,22 @@ func main() {
 				reload, err := tmp.GatherURL()
 				if err != nil {
 					log.Printf("[error] %v", err)
-					if *plugin == "true" {
-						fmt.Printf("templates,src=%s,dest=%s success=0,updated=0\n", tmpl.Src, tmpl.Dest)
+					if *plugin {
+			 			fmt.Printf("telegraf_confd,src=%s,dest=%s success=0\n", tmpl.Src, tmpl.Dest)
 					}
 					return
 				}
 
+				if *plugin {
+					fmt.Printf("telegraf_confd,src=%s,dest=%s success=1\n", tmpl.Src, tmpl.Dest)
+				}	
+
 				if reload {
 					rl = true
-					if *plugin == "true" {
-						fmt.Printf("templates,src=%s,dest=%s success=1,updated=1\n", tmpl.Src, tmpl.Dest)
-					}
 					if tmpl.ReloadCmd != "" {
 						runCommand(tmpl.CheckCmd, tmpl.ReloadCmd)
 					}
-				} else {
-					if *plugin == "true" {
-						fmt.Printf("templates,src=%s,dest=%s success=1,updated=0\n", tmpl.Src, tmpl.Dest)
-					}
-				}
-				
+				} 
 			}(t)
 		}
 
@@ -156,7 +152,7 @@ func main() {
 			}
 		}
 
-		time.Sleep(cfg.Server.Interval * time.Second)
+		time.Sleep(time.Duration(*interval) * time.Second)
 	}
 
 }
