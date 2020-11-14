@@ -13,7 +13,7 @@ import (
 	"os/exec"
 	"github.com/naoina/toml"
 	"gopkg.in/natefinch/lumberjack.v2"
-	"github.com/ltkh/confd/internal/template"
+	"github.com/ltkh/confd/template"
 )
 
 type Config struct {
