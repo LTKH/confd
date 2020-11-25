@@ -1,4 +1,4 @@
-module github.com/ltkh/confd
+module github.com/ltkh/telegraf-confd
 
 go 1.14
 

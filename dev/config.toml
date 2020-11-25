@@ -1,0 +1,4 @@
+[[template]]
+urls = ["http://localhost:8080/localhost"]
+src = "dev/inputs.tmpl"
+dest = "/tmp/localhost.conf"

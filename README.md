@@ -1,1 +1,1 @@
-# confd
+# telegraf-confd
