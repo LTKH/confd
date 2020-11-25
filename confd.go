@@ -86,19 +86,33 @@ func main() {
         })
     }
 
-    //program completion signal processing
-    c := make(chan os.Signal, 2)
-    signal.Notify(c, os.Interrupt, syscall.SIGTERM)
+	log.Print("[info] confd started -_-")
+	
+	run := true
+
+    // Program completion signal processing
+    e := make(chan os.Signal, 2)
+    signal.Notify(e, os.Interrupt, syscall.SIGTERM)
     go func() {
-        <- c
+        <- e
         log.Print("[info] confd stopped")
         os.Exit(0)
     }()
 
-    log.Print("[info] confd started -_-")
+    // Program run signal processing
+	c := make(chan os.Signal, 1)
+	signal.Notify(c, syscall.SIGHUP)
+	go func() {
+        <-c
+        run = true
+    }()
 
-    //daemon mode
-    for {
+    // Daemon mode
+    for (run) {
+
+		if *plugin == "telegraf" {
+			run = false
+		}
 
         //loading configuration file
         f, err := os.Open(*cfFile)
