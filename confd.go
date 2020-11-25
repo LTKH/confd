@@ -68,7 +68,7 @@ func main() {
     cfFile          := flag.String("config", "", "config file")
     lgFile          := flag.String("logfile", "", "log file")
     interval        := flag.Int("interval", 30, "interval")
-    plugin          := flag.Int("plugin", "", "plugin")
+    plugin          := flag.String("plugin", "", "plugin")
     log_max_size    := flag.Int("log_max_size", 1, "log max size") 
     log_max_backups := flag.Int("log_max_backups", 3, "log max backups")
     log_max_age     := flag.Int("log_max_age", 10, "log max age")

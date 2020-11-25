@@ -1,6 +1,3 @@
-# github.com/ltkh/template v0.0.0-20201114235316-2eba32026e79
-## explicit
-github.com/ltkh/template
 # github.com/naoina/go-stringutil v0.1.0
 ## explicit
 github.com/naoina/go-stringutil
