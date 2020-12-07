@@ -82,37 +82,37 @@ func main() {
         })
     }
 
-	log.Print("[info] confd started -_-")
-	
-	run := true
+    log.Print("[info] confd started -_-")
+    
+    run := true
 
     // Program signal processing
     c := make(chan os.Signal, 1)
     signal.Notify(c, os.Interrupt, syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM)
     go func(){
-		for {
-			s := <-c
-			switch s {
-				case syscall.SIGHUP:
-					run = true
-				case syscall.SIGINT:
-					log.Print("[info] confd stopped")
+        for {
+            s := <-c
+            switch s {
+                case syscall.SIGHUP:
+                    run = true
+                case syscall.SIGINT:
+                    log.Print("[info] confd stopped")
                     os.Exit(0)
-				case syscall.SIGTERM:
-					log.Print("[info] confd stopped")
+                case syscall.SIGTERM:
+                    log.Print("[info] confd stopped")
                     os.Exit(0)
-				default:
-					log.Print("[info] unknown signal received")
-			}
-		}
+                default:
+                    log.Print("[info] unknown signal received")
+            }
+        }
     }()
 
     // Daemon mode
     for (run) {
 
-		if *plugin == "telegraf" {
-			run = false
-		}
+        if *plugin == "telegraf" {
+            run = false
+        }
 
         //loading configuration file
         f, err := os.Open(*cfFile)
@@ -164,4 +164,3 @@ func main() {
     }
 
 }
-
