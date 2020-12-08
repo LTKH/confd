@@ -11,6 +11,7 @@ import (
     "sync"
     "fmt"
     "os/exec"
+    "context"
     "github.com/naoina/toml"
     "gopkg.in/natefinch/lumberjack.v2"
     "github.com/ltkh/confd/internal/template"
@@ -20,39 +21,35 @@ type Config struct {
     Template       []template.HTTPTemplate
 }
 
-func checkCmd() error {
-    /*
-    var cmdBuffer bytes.Buffer
-    data := make(map[string]string)
-    data["src"] = t.StageFile.Name()
-    tmpl, err := template.New("checkcmd").Parse(t.CheckCmd)
-    if err != nil {
-        return err
-    }
-    if err := tmpl.Execute(&cmdBuffer, data); err != nil {
-        return err
-    }
-    return runCommand(cmdBuffer.String())
-    */
-    return nil
-}
+func runCommand(scmd string, timeout time.Duration) ([]byte, error) {
+    log.Printf("[info] running '%s'", scmd)
+    // Create a new context and add a timeout to it
+    ctx, cancel := context.WithTimeout(context.Background(), timeout * time.Second)
+    defer cancel() // The cancel should be deferred so resources are cleaned up
 
-func runCommand(check, cmd string) error {
-    log.Printf("[info] running %s", cmd)
-    var c *exec.Cmd
+    // Create the command with our context
+    var cmd *exec.Cmd
     if runtime.GOOS == "windows" {
-        c = exec.Command("cmd", "/C", cmd)
+        cmd = exec.CommandContext(ctx, "cmd", "/C", scmd)
     } else {
-        c = exec.Command("/bin/sh", "-c", cmd)
+        cmd = exec.CommandContext(ctx, "/bin/sh", "-c", scmd)
     }
 
-    output, err := c.CombinedOutput()
-    if err != nil {
-        log.Printf("[error] %q", string(output))
-        return err
+    // This time we can simply use Output() to get the result.
+    out, err := cmd.Output()
+
+    // Check the context error to see if the timeout was executed
+    if ctx.Err() == context.DeadlineExceeded {
+        return nil, fmt.Errorf("command timed out '%s'", scmd)
     }
-    log.Printf("[info] %q", string(output))
-    return nil
+
+    // If there's no context error, we know the command completed (or errored).
+    if err != nil {
+        return nil, fmt.Errorf("non-zero exit code: %v '%s'", err, scmd)
+    }
+
+    log.Printf("[info] finished '%s'", scmd)
+    return out, nil
 }
 
 func main() {
@@ -152,7 +149,7 @@ func main() {
                 if reload {
                     rl = true
                     if tmpl.ReloadCmd != "" {
-                        runCommand(tmpl.CheckCmd, tmpl.ReloadCmd)
+                        runCommand(tmpl.ReloadCmd, 5)
                     }
                 } 
             }(t)

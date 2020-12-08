@@ -14,6 +14,7 @@ import (
     "crypto/md5"
     "encoding/hex"
     "os"
+    "math/rand"
 )
 
 type HTTPTemplate struct {
@@ -58,6 +59,9 @@ func New(h HTTPTemplate) HTTPTemplate {
         },
         //Timeout: h.Timeout,
     }
+
+    rand.Seed(time.Now().UnixNano())
+    rand.Shuffle(len(h.URLs), func(i, j int) { h.URLs[i], h.URLs[j] = h.URLs[j], h.URLs[i] })
 
     return h
 }
