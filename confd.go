@@ -12,6 +12,8 @@ import (
     "fmt"
     "os/exec"
     "context"
+    "encoding/json"
+    "io/ioutil"
     "github.com/naoina/toml"
     "gopkg.in/natefinch/lumberjack.v2"
     "github.com/ltkh/confd/internal/template"
@@ -62,20 +64,53 @@ func main() {
     lgFile          := flag.String("logfile", "", "log file")
     interval        := flag.Int("interval", 30, "interval")
     plugin          := flag.String("plugin", "", "plugin")
-    log_max_size    := flag.Int("log_max_size", 1, "log max size") 
-    log_max_backups := flag.Int("log_max_backups", 3, "log max backups")
-    log_max_age     := flag.Int("log_max_age", 10, "log max age")
-    log_compress    := flag.Bool("log_compress", true, "log compress")
+    logMaxSize      := flag.Int("log.max-size", 1, "log max size") 
+    logMaxBackups   := flag.Int("log.max-backups", 3, "log max backups")
+    logMaxAge       := flag.Int("log.max-age", 10, "log max age")
+    logCompress     := flag.Bool("log.compress", true, "log compress")
+
+    srcFile         := flag.String("src-file", "", "source file")
+    srcTmpl         := flag.String("src-tmpl", "", "source template")
+    destFile        := flag.String("dest-file", "", "destination file")
     flag.Parse()
+
+    if *srcFile != "" {
+        tmpl := template.HTTPTemplate{
+            Src:  *srcTmpl,
+            Dest: *destFile,
+        }
+
+        data, err := ioutil.ReadFile(*srcFile)
+        if err != nil {
+            log.Fatalf("[error] reading source file: %v", err)
+        }
+
+        var jsn interface{}
+        if err := json.Unmarshal(data, &jsn); err != nil {
+            log.Fatalf("[error] parsing json file: %v", err)
+        }
+
+        tmp := template.New(tmpl)
+        cont, err := tmp.GetGonfig(jsn)
+        if err != nil {
+            log.Fatalf("[error] creating config file: %v", err)
+        }
+
+        if err := ioutil.WriteFile(*destFile, cont, 0644); err != nil {
+            log.Fatalf("[error] writing config file: %v", err)
+        }
+
+        os.Exit(0)
+    }
 
     // Logging settings
     if *lgFile != "" || *plugin != "" {
         log.SetOutput(&lumberjack.Logger{
             Filename:   *lgFile,
-            MaxSize:    *log_max_size,    // megabytes after which new file is created
-            MaxBackups: *log_max_backups, // number of backups
-            MaxAge:     *log_max_age,     // days
-            Compress:   *log_compress,    // using gzip
+            MaxSize:    *logMaxSize,    // megabytes after which new file is created
+            MaxBackups: *logMaxBackups, // number of backups
+            MaxAge:     *logMaxAge,     // days
+            Compress:   *logCompress,    // using gzip
         })
     }
 
@@ -114,17 +149,16 @@ func main() {
         //loading configuration file
         f, err := os.Open(*cfFile)
         if err != nil {
-            log.Fatalf("[error] %v", err)
+            log.Fatalf("[error] reading config file: %v", err)
         }
         defer f.Close()
         
         var cfg Config
         if err := toml.NewDecoder(f).Decode(&cfg); err != nil {
-            log.Fatalf("[error] %v", err)
+            log.Fatalf("[error] parsing config file: %v", err)
         }
 
         var wg sync.WaitGroup
-        var rl bool
 
         for _, t := range cfg.Template {
             wg.Add(1)
@@ -147,7 +181,6 @@ func main() {
                 }
 
                 if reload {
-                    rl = true
                     if tmpl.ReloadCmd != "" {
                         runCommand(tmpl.ReloadCmd, 5)
                     }

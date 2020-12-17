@@ -47,26 +47,29 @@ func getHash(data []byte) string {
 
 func New(h HTTPTemplate) HTTPTemplate {
 
-    // Set default timeout
-    if h.Timeout == 0 {
-        h.Timeout = 5000
-    }
+    if len(h.URLs) != 0 {
 
-    h.client = &http.Client{
-        Transport: &http.Transport{
-            //TLSClientConfig: tlsCfg,
-            Proxy:           http.ProxyFromEnvironment,
-        },
-        //Timeout: h.Timeout,
-    }
+        // Set default timeout
+        if h.Timeout == 0 {
+            h.Timeout = 5000
+        }
 
-    rand.Seed(time.Now().UnixNano())
-    rand.Shuffle(len(h.URLs), func(i, j int) { h.URLs[i], h.URLs[j] = h.URLs[j], h.URLs[i] })
+        h.client = &http.Client{
+            Transport: &http.Transport{
+                //TLSClientConfig: tlsCfg,
+                Proxy:           http.ProxyFromEnvironment,
+            },
+            //Timeout: h.Timeout,
+        }
+
+        rand.Seed(time.Now().UnixNano())
+        rand.Shuffle(len(h.URLs), func(i, j int) { h.URLs[i], h.URLs[j] = h.URLs[j], h.URLs[i] })
+    }
 
     return h
 }
 
-func (h *HTTPTemplate) getGonfig(jsn interface{}) ([]byte, error) {
+func (h *HTTPTemplate) GetGonfig(jsn interface{}) ([]byte, error) {
     funcMap := template.FuncMap{
         "toInt":           toInt,
         "toFloat":         toFloat,
@@ -162,7 +165,7 @@ func (h *HTTPTemplate) GetResponse() ([]byte, error) {
         return body, nil
     }
 
-    return nil, fmt.Errorf("error failed to complete any request")
+    return nil, fmt.Errorf("failed to complete any request")
 }
 
 func (h *HTTPTemplate) GatherURL() (bool, error) {
@@ -174,32 +177,32 @@ func (h *HTTPTemplate) GatherURL() (bool, error) {
 
     var jsn interface{}
     if err := json.Unmarshal(body, &jsn); err != nil {
-        return false, fmt.Errorf("error reading json from response body: %s", err)
+        return false, fmt.Errorf("reading json from response body: %s", err)
     }
 
-    cont, err := h.getGonfig(jsn)
+    cont, err := h.GetGonfig(jsn)
     if err != nil {
-        return false, fmt.Errorf("error generating config: %s", err)
+        return false, fmt.Errorf("generating config: %s", err)
     }
 
     if _, err := os.Stat(h.Dest); err == nil {
         conf, err := ioutil.ReadFile(h.Dest)
         if err != nil {
-            return false, fmt.Errorf("error reading config file %s: %s", h.Dest, err)
+            return false, fmt.Errorf("reading config file %s: %s", h.Dest, err)
         }
         if getHash(conf) != getHash(cont) {
             if err := ioutil.WriteFile(h.Dest, cont, 0644); err != nil {
-                return false, fmt.Errorf("error writing config file %s: %s", h.Dest, err)
+                return false, fmt.Errorf("writing config file %s: %s", h.Dest, err)
             }
             return true, nil
         }
     } else if os.IsNotExist(err) {
         if err := ioutil.WriteFile(h.Dest, cont, 0644); err != nil {
-            return false, fmt.Errorf("error writing config file %s: %s", h.Dest, err)
+            return false, fmt.Errorf("writing config file %s: %s", h.Dest, err)
         }
         return true, nil
     } else {
-        return false, fmt.Errorf("error reading config file status %s: %s", h.Dest, err)
+        return false, fmt.Errorf("reading config file status %s: %s", h.Dest, err)
     }
 
     return false, nil
