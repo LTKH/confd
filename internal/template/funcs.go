@@ -88,11 +88,10 @@ func pushToArray(arr []interface{}, vl interface{}) []interface{} {
 
 func connectHttpFunc(method string, url string, code int) bool {
     client := &http.Client{
-		Transport: &http.Transport{
-			DisableKeepAlives: true,
-			//TLSClientConfig:   tlsCfg,
-		},
-		Timeout: time.Duration(5) * time.Second,
+        Transport: &http.Transport{
+            Proxy: http.ProxyFromEnvironment,
+        },
+        Timeout: time.Duration(5) * time.Second,
     }
     
     request, err := http.NewRequest(method, url, nil)
@@ -106,11 +105,11 @@ func connectHttpFunc(method string, url string, code int) bool {
     }
     defer resp.Body.Close()
 
-    if resp.StatusCode != code {
-        return false
+    if resp.StatusCode == code {
+        return true
     }
 
-    return true
+    return false
 }
 
 // replaceAll replaces all occurrences of a value in a string with the given
