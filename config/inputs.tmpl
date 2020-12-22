@@ -2,11 +2,14 @@
 {{ range $key, $app := .apps -}}
     {{- with $app.url -}}
         {{- if not (index $map $app.url) -}}
-            {{ template "inputs.http_response" $app }}
+            {{- if connectHttp "GET" $app.url 200 -}}
+                {{ template "inputs.http_response" $app }}
+            {{- end -}}
         {{- end -}}
         {{- $map = pushToMap $map $app.url 1 -}}
     {{- end -}}
 {{ end }}
+test = {{ replaceAll ".example.com" "" "test.example.com" }}
 
 {{ define "inputs.http_response" }}
 [[inputs.http_response]]

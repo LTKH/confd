@@ -5,6 +5,9 @@ import (
     "reflect"
     "regexp"
     "strconv"
+    "strings"
+    "net/http"
+    "time"
 )
 
 func toInt(i interface{}) (int64, error) {
@@ -61,14 +64,6 @@ func addFunc(b, a interface{}) (float64, error) {
     }
 }
 
-func regexReplaceAll(re, pl, s string) (string, error) {
-    compiled, err := regexp.Compile(re)
-    if err != nil {
-        return "", err
-    }
-    return compiled.ReplaceAllString(s, pl), nil
-}
-
 func strQuote(data string) (string, error) {
     s := strconv.Quote(data)
     return s[1:len(s)-1], nil
@@ -91,3 +86,55 @@ func pushToArray(arr []interface{}, vl interface{}) []interface{} {
     return append(arr, vl)
 }
 
+func connectHttpFunc(method string, url string, code int) bool {
+    client := &http.Client{
+		Transport: &http.Transport{
+			DisableKeepAlives: true,
+			//TLSClientConfig:   tlsCfg,
+		},
+		Timeout: time.Duration(5) * time.Second,
+    }
+    
+    request, err := http.NewRequest(method, url, nil)
+    if err != nil {
+        return false
+    }
+
+    resp, err := client.Do(request)
+    if err != nil {
+        return false
+    }
+    defer resp.Body.Close()
+
+    if resp.StatusCode != code {
+        return false
+    }
+
+    return true
+}
+
+// replaceAll replaces all occurrences of a value in a string with the given
+// replacement value.
+func replaceAll(f, t, s string) (string, error) {
+	return strings.Replace(s, f, t, -1), nil
+}
+
+// regexReplaceAll replaces all occurrences of a regular expression with
+// the given replacement value.
+func regexReplaceAll(re, pl, s string) (string, error) {
+	compiled, err := regexp.Compile(re)
+	if err != nil {
+		return "", err
+	}
+	return compiled.ReplaceAllString(s, pl), nil
+}
+
+// regexMatch returns true or false if the string matches
+// the given regular expression
+func regexMatch(re, s string) (bool, error) {
+	compiled, err := regexp.Compile(re)
+	if err != nil {
+		return false, err
+	}
+	return compiled.MatchString(s), nil
+}

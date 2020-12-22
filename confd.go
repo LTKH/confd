@@ -14,13 +14,170 @@ import (
     "context"
     "encoding/json"
     "io/ioutil"
+    "math/rand"
+    "strings"
+    "net/http"
+    "crypto/md5"
+    "encoding/hex"
     "github.com/naoina/toml"
     "gopkg.in/natefinch/lumberjack.v2"
     "github.com/ltkh/confd/internal/template"
 )
 
 type Config struct {
-    Template       []template.HTTPTemplate
+    Template       []HTTPTemplate
+}
+
+type HTTPTemplate struct {
+    URLs                []string           `toml:"urls"`
+    Timeout             time.Duration      `toml:"timeout"`
+    Src                 string             `toml:"src"`
+    Dest                string             `toml:"dest"`
+    CheckCmd            string             `toml:"check_cmd"`
+    ReloadCmd           string             `toml:"reload_cmd"`
+
+    ContentEncoding     string             `toml:"content_encoding"`
+
+    Headers             map[string]string  `toml:"headers"`
+
+    // HTTP Basic Auth Credentials
+    Username            string             `toml:"username"`
+    Password            string             `toml:"password"`
+
+    // Absolute path to file with Bearer token
+    BearerToken         string             `toml:"bearer_token"`
+
+    client              *http.Client
+}
+
+func NewHttpTemplate(h *HTTPTemplate) *HTTPTemplate {
+
+    // Set default timeout
+    if h.Timeout == 0 {
+        h.Timeout = 5000
+    }
+
+    h.client = &http.Client{
+        Transport: &http.Transport{
+            Proxy:           http.ProxyFromEnvironment,
+        },
+        //Timeout: h.Timeout,
+    }
+
+    rand.Seed(time.Now().UnixNano())
+    rand.Shuffle(len(h.URLs), func(i, j int) { h.URLs[i], h.URLs[j] = h.URLs[j], h.URLs[i] })
+
+    return h
+}
+
+func (h *HTTPTemplate) getResponse() ([]byte, error) {
+
+    for _, url := range h.URLs {
+
+        request, err := http.NewRequest("GET", url, nil)
+        if err != nil {
+            log.Printf("[error] %s - %v", url, err)
+            continue
+        }
+
+        if h.BearerToken != "" {
+            token, err := ioutil.ReadFile(h.BearerToken)
+            if err != nil {
+                log.Printf("[error] %s - %v", url, err)
+                continue
+            }
+            bearer := "Bearer " + strings.Trim(string(token), "\n")
+            request.Header.Set("Authorization", bearer)
+        }
+
+        if h.ContentEncoding == "gzip" {
+            request.Header.Set("Content-Encoding", "gzip")
+        }
+
+        for k, v := range h.Headers {
+            if strings.ToLower(k) == "host" {
+                request.Host = v
+            } else {
+                request.Header.Add(k, v)
+            }
+        }
+
+        if h.Username != "" || h.Password != "" {
+            request.SetBasicAuth(h.Username, h.Password)
+        }
+
+        resp, err := h.client.Do(request)
+        if err != nil {
+            log.Printf("[error] %s - %v", url, err)
+            continue
+        }
+        defer resp.Body.Close()
+
+        if resp.StatusCode != 200 {
+            log.Printf("[error] %s - received status code %d (%s)", url, resp.StatusCode, http.StatusText(resp.StatusCode))
+            continue
+        }
+
+        body, err := ioutil.ReadAll(resp.Body)
+        if err != nil {
+            continue
+        }
+
+        return body, nil
+    }
+
+    return nil, fmt.Errorf("failed to complete any request")
+}
+
+func (h *HTTPTemplate) gatherURL() (bool, error) {
+    
+    body, err := h.getResponse()
+    if err != nil {
+        return false, err
+    }
+
+    var jsn interface{}
+    if err := json.Unmarshal(body, &jsn); err != nil {
+        return false, fmt.Errorf("reading json from response body: %v", err)
+    }
+
+    tmpl, err := template.NewTemplate(h.Src)
+    if err != nil {
+        log.Fatalf("[error] %v", err)
+    }
+
+    cont, err := tmpl.Execute(jsn)
+    if err != nil {
+        return false, fmt.Errorf("generating config: %v", err)
+    }
+
+    if _, err := os.Stat(h.Dest); err == nil {
+        conf, err := ioutil.ReadFile(h.Dest)
+        if err != nil {
+            return false, fmt.Errorf("reading config file %s: %v", h.Dest, err)
+        }
+        if getHash(conf) != getHash(cont.Output) {
+            if err := ioutil.WriteFile(h.Dest, cont.Output, 0644); err != nil {
+                return false, fmt.Errorf("writing config file %s: %v", h.Dest, err)
+            }
+            return true, nil
+        }
+    } else if os.IsNotExist(err) {
+        if err := ioutil.WriteFile(h.Dest, cont.Output, 0644); err != nil {
+            return false, fmt.Errorf("writing config file %s: %v", h.Dest, err)
+        }
+        return true, nil
+    } else {
+        return false, fmt.Errorf("reading config file status %s: %v", h.Dest, err)
+    }
+
+    return false, nil
+}
+
+func getHash(data []byte) string {
+    hsh := md5.New()
+    hsh.Write(data)
+    return hex.EncodeToString(hsh.Sum(nil))
 }
 
 func runCommand(scmd string, timeout time.Duration) ([]byte, error) {
@@ -72,12 +229,14 @@ func main() {
     srcFile         := flag.String("src-file", "", "source file")
     srcTmpl         := flag.String("src-tmpl", "", "source template")
     destFile        := flag.String("dest-file", "", "destination file")
+
     flag.Parse()
 
+    // Generate configuration
     if *srcFile != "" {
-        tmpl := template.HTTPTemplate{
-            Src:  *srcTmpl,
-            Dest: *destFile,
+        tmpl, err := template.NewTemplate(*srcTmpl)
+        if err != nil {
+            log.Fatalf("[error] generating template: %v", err)
         }
 
         data, err := ioutil.ReadFile(*srcFile)
@@ -90,13 +249,12 @@ func main() {
             log.Fatalf("[error] parsing json file: %v", err)
         }
 
-        tmp := template.New(tmpl)
-        cont, err := tmp.GetGonfig(jsn)
+        cont, err := tmpl.Execute(jsn)
         if err != nil {
-            log.Fatalf("[error] creating config file: %v", err)
+            log.Fatalf("[error] generating config file: %v", err)
         }
 
-        if err := ioutil.WriteFile(*destFile, cont, 0644); err != nil {
+        if err := ioutil.WriteFile(*destFile, cont.Output, 0644); err != nil {
             log.Fatalf("[error] writing config file: %v", err)
         }
 
@@ -162,12 +320,12 @@ func main() {
 
         for _, t := range cfg.Template {
             wg.Add(1)
-            go func(tmpl template.HTTPTemplate) {
+            go func(tmpl HTTPTemplate) {
                 defer wg.Done()
 
-                tmp := template.New(tmpl)
+                http := NewHttpTemplate(&tmpl)
 
-                reload, err := tmp.GatherURL()
+                reload, err := http.gatherURL()
                 if err != nil {
                     log.Printf("[error] %v", err)
                     if *plugin == "telegraf" {

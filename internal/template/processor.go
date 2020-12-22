@@ -1,80 +1,46 @@
 package template
 
 import (
-    "fmt"
-    "log"
-    "io/ioutil"
-    "net/http"
     "strings"
     "time"
     "text/template"
     "path/filepath"
     "bytes"
-    "encoding/json"
-    "crypto/md5"
-    "encoding/hex"
-    "os"
-    "math/rand"
+    "github.com/pkg/errors"
 )
 
-type HTTPTemplate struct {
-    URLs                []string           `toml:"urls"`
-    Timeout             time.Duration      `toml:"timeout"`
-    Src                 string             `toml:"src"`
-    Dest                string             `toml:"dest"`
-    CheckCmd            string             `toml:"check_cmd"`
-    ReloadCmd           string             `toml:"reload_cmd"`
+// Template is the internal representation of an individual template to process.
+// The template retains the relationship between it's contents and is
+// responsible for it's own execution.
+type Template struct {
+	// contents is the string contents for the template. It is either given
+	// during template creation or read from disk when initialized.
+	contents string
 
-    ContentEncoding     string             `toml:"content_encoding"`
-
-    Headers             map[string]string  `toml:"headers"`
-
-    // HTTP Basic Auth Credentials
-    Username            string             `toml:"username"`
-    Password            string             `toml:"password"`
-
-    // Absolute path to file with Bearer token
-    BearerToken         string             `toml:"bearer_token"`
-
-    client              *http.Client
+	// source is the original location of the template. This may be undefined if
+	// the template was dynamically defined.
+	source string
 }
 
-func getHash(data []byte) string {
-    hsh := md5.New()
-    hsh.Write(data)
-    return hex.EncodeToString(hsh.Sum(nil))
+// ExecuteResult is the result of the template execution.
+type ExecuteResult struct {
+	// Output is the rendered result.
+	Output []byte
 }
 
-func New(h HTTPTemplate) HTTPTemplate {
+func NewTemplate(source string) (*Template, error) {
 
-    if len(h.URLs) != 0 {
+    var t Template
+	t.source = source
 
-        // Set default timeout
-        if h.Timeout == 0 {
-            h.Timeout = 5000
-        }
-
-        h.client = &http.Client{
-            Transport: &http.Transport{
-                //TLSClientConfig: tlsCfg,
-                Proxy:           http.ProxyFromEnvironment,
-            },
-            //Timeout: h.Timeout,
-        }
-
-        rand.Seed(time.Now().UnixNano())
-        rand.Shuffle(len(h.URLs), func(i, j int) { h.URLs[i], h.URLs[j] = h.URLs[j], h.URLs[i] })
-    }
-
-    return h
+    return &t, nil
 }
 
-func (h *HTTPTemplate) GetGonfig(jsn interface{}) ([]byte, error) {
+func (t *Template) Execute(jsn interface{}) (*ExecuteResult, error) {
     funcMap := template.FuncMap{
         "toInt":           toInt,
         "toFloat":         toFloat,
         "add":             addFunc,
-        "regexReplace":    regexReplaceAll,
         "strQuote":        strQuote,
         "base":            filepath.Base,
         "split":           strings.Split,
@@ -94,116 +60,27 @@ func (h *HTTPTemplate) GetGonfig(jsn interface{}) ([]byte, error) {
         "div":             func(a, b int) int { return a / b },
         "mod":             func(a, b int) int { return a % b },
         "mul":             func(a, b int) int { return a * b },
+        "connectHttp":     connectHttpFunc,
+        "regexReplaceAll": regexReplaceAll,
+		"regexMatch":      regexMatch,
+		"replaceAll":      replaceAll,
     }
 
-    tmpl, err := template.New(filepath.Base(h.Src)).Funcs(funcMap).ParseFiles(h.Src)
-    if err != nil {
-        return nil, err
-    }
+    tmpl := template.New(filepath.Base(t.source))
+    tmpl.Funcs(funcMap)
 
-    var conf bytes.Buffer
-    if err = tmpl.Execute(&conf, &jsn); err != nil {
-        return nil, err
-    }
+    tmpl, err := tmpl.ParseFiles(t.source)
+	if err != nil {
+		return nil, errors.Wrap(err, "parse")
+	}
 
-    return conf.Bytes(), nil
-}
+	// Execute the template into the writer
+	var b bytes.Buffer
+	if err := tmpl.Execute(&b, &jsn); err != nil {
+		return nil, errors.Wrap(err, "execute")
+	}
 
-func (h *HTTPTemplate) GetResponse() ([]byte, error) {
-
-    for _, url := range h.URLs {
-
-        request, err := http.NewRequest("GET", url, nil)
-        if err != nil {
-            log.Printf("[error] %s - %v", url, err)
-            continue
-        }
-
-        if h.BearerToken != "" {
-            token, err := ioutil.ReadFile(h.BearerToken)
-            if err != nil {
-                log.Printf("[error] %s - %v", url, err)
-                continue
-            }
-            bearer := "Bearer " + strings.Trim(string(token), "\n")
-            request.Header.Set("Authorization", bearer)
-        }
-
-        if h.ContentEncoding == "gzip" {
-            request.Header.Set("Content-Encoding", "gzip")
-        }
-
-        for k, v := range h.Headers {
-            if strings.ToLower(k) == "host" {
-                request.Host = v
-            } else {
-                request.Header.Add(k, v)
-            }
-        }
-
-        if h.Username != "" || h.Password != "" {
-            request.SetBasicAuth(h.Username, h.Password)
-        }
-
-        resp, err := h.client.Do(request)
-        if err != nil {
-            log.Printf("[error] %s - %v", url, err)
-            continue
-        }
-        defer resp.Body.Close()
-
-        if resp.StatusCode != 200 {
-            log.Printf("[error] %s - received status code %d (%s), expected any value out of 200", url, resp.StatusCode, http.StatusText(resp.StatusCode))
-            continue
-        }
-
-        body, err := ioutil.ReadAll(resp.Body)
-        if err != nil {
-            continue
-        }
-
-        return body, nil
-    }
-
-    return nil, fmt.Errorf("failed to complete any request")
-}
-
-func (h *HTTPTemplate) GatherURL() (bool, error) {
-    
-    body, err := h.GetResponse()
-    if err != nil {
-        return false, err
-    }
-
-    var jsn interface{}
-    if err := json.Unmarshal(body, &jsn); err != nil {
-        return false, fmt.Errorf("reading json from response body: %s", err)
-    }
-
-    cont, err := h.GetGonfig(jsn)
-    if err != nil {
-        return false, fmt.Errorf("generating config: %s", err)
-    }
-
-    if _, err := os.Stat(h.Dest); err == nil {
-        conf, err := ioutil.ReadFile(h.Dest)
-        if err != nil {
-            return false, fmt.Errorf("reading config file %s: %s", h.Dest, err)
-        }
-        if getHash(conf) != getHash(cont) {
-            if err := ioutil.WriteFile(h.Dest, cont, 0644); err != nil {
-                return false, fmt.Errorf("writing config file %s: %s", h.Dest, err)
-            }
-            return true, nil
-        }
-    } else if os.IsNotExist(err) {
-        if err := ioutil.WriteFile(h.Dest, cont, 0644); err != nil {
-            return false, fmt.Errorf("writing config file %s: %s", h.Dest, err)
-        }
-        return true, nil
-    } else {
-        return false, fmt.Errorf("reading config file status %s: %s", h.Dest, err)
-    }
-
-    return false, nil
+    return &ExecuteResult{
+		Output:  b.Bytes(),
+	}, nil
 }
