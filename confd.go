@@ -25,7 +25,7 @@ import (
 )
 
 type Config struct {
-    Template       []HTTPTemplate
+    Templates           []HTTPTemplate
 }
 
 type HTTPTemplate struct {
@@ -318,7 +318,7 @@ func main() {
 
         var wg sync.WaitGroup
 
-        for _, t := range cfg.Template {
+        for _, t := range cfg.Templates {
             wg.Add(1)
             go func(tmpl HTTPTemplate) {
                 defer wg.Done()
