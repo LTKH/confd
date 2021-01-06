@@ -10,6 +10,7 @@
     {{- end -}}
 {{ end }}
 test = {{ replaceAll ".example.com" "" "test.example.com" }}
+urls = "{{ join "," .urls }}"
 
 {{ define "inputs.http_response" }}
 [[inputs.http_response]]

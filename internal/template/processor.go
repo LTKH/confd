@@ -49,7 +49,7 @@ func (t *Template) Execute(jsn interface{}) (*ExecuteResult, error) {
         "pushToMap":       pushToMap,
         "createArr":       createArray,
         "pushToArr":       pushToArray,
-        "join":            strings.Join,
+        "join":            join,
         "datetime":        time.Now,
         "toUpper":         strings.ToUpper,
         "toLower":         strings.ToLower,

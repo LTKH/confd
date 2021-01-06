@@ -137,3 +137,12 @@ func regexMatch(re, s string) (bool, error) {
 	}
 	return compiled.MatchString(s), nil
 }
+
+// join is a version of strings.Join that can be piped
+func join(sep string, a []interface{}) (string, error) {
+    var arr []string
+    for _, v := range a {
+        arr = append(arr, v.(string))
+    }
+	return strings.Join(arr, sep), nil
+}
