@@ -11,6 +11,7 @@
 {{ end }}
 test = {{ replaceAll ".example.com" "" "test.example.com" }}
 urls = "{{ join "," .urls }}"
+{{ lookupIPV4 "google.com" }}
 
 {{ define "inputs.http_response" }}
 [[inputs.http_response]]

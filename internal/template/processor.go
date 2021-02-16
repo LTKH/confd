@@ -64,6 +64,8 @@ func (t *Template) Execute(jsn interface{}) (*ExecuteResult, error) {
         "regexReplaceAll": regexReplaceAll,
 		"regexMatch":      regexMatch,
 		"replaceAll":      replaceAll,
+        "lookupIPV4":      lookupIPV4,
+	    "lookupIPV6":      lookupIPV6,
     }
 
     tmpl := template.New(filepath.Base(t.source))

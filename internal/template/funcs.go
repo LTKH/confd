@@ -8,6 +8,8 @@ import (
     "strings"
     "net/http"
     "time"
+    "net"
+    "sort"
 )
 
 func toInt(i interface{}) (int64, error) {
@@ -145,4 +147,39 @@ func join(sep string, a []interface{}) (string, error) {
         arr = append(arr, v.(string))
     }
 	return strings.Join(arr, sep), nil
+}
+
+func lookupIP(data string) []string {
+	ips, err := net.LookupIP(data)
+	if err != nil {
+		return nil
+	}
+	// "Cast" IPs into strings and sort the array
+	ipStrings := make([]string, len(ips))
+
+	for i, ip := range ips {
+		ipStrings[i] = ip.String()
+	}
+	sort.Strings(ipStrings)
+	return ipStrings
+}
+
+func lookupIPV6(data string) []string {
+	var addresses []string
+	for _, ip := range lookupIP(data) {
+		if strings.Contains(ip, ":") {
+			addresses = append(addresses, ip)
+		}
+	}
+	return addresses
+}
+
+func lookupIPV4(data string) []string {
+	var addresses []string
+	for _, ip := range lookupIP(data) {
+		if strings.Contains(ip, ".") {
+			addresses = append(addresses, ip)
+		}
+	}
+	return addresses
 }

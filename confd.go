@@ -268,7 +268,7 @@ func main() {
             MaxSize:    *logMaxSize,    // megabytes after which new file is created
             MaxBackups: *logMaxBackups, // number of backups
             MaxAge:     *logMaxAge,     // days
-            Compress:   *logCompress,    // using gzip
+            Compress:   *logCompress,   // using gzip
         })
     }
 
@@ -297,23 +297,23 @@ func main() {
         }
     }()
 
+    //loading configuration file
+    f, err := os.Open(*cfFile)
+    if err != nil {
+        log.Fatalf("[error] reading config file: %v", err)
+    }
+    defer f.Close()
+    
+    var cfg Config
+    if err := toml.NewDecoder(f).Decode(&cfg); err != nil {
+        log.Fatalf("[error] parsing config file: %v", err)
+    }
+
     // Daemon mode
     for (run) {
 
         if *plugin == "telegraf" {
             run = false
-        }
-
-        //loading configuration file
-        f, err := os.Open(*cfFile)
-        if err != nil {
-            log.Fatalf("[error] reading config file: %v", err)
-        }
-        defer f.Close()
-        
-        var cfg Config
-        if err := toml.NewDecoder(f).Decode(&cfg); err != nil {
-            log.Fatalf("[error] parsing config file: %v", err)
         }
 
         var wg sync.WaitGroup
