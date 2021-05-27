@@ -217,7 +217,7 @@ func main() {
     runtime.GOMAXPROCS(runtime.NumCPU())
 
     //command-line flag parsing
-    cfFile          := flag.String("config", "", "config file")
+    cfFile          := flag.String("config", "../../config/config.toml", "config file")
     lgFile          := flag.String("logfile", "", "log file")
     interval        := flag.Int("interval", 30, "interval")
     plugin          := flag.String("plugin", "", "plugin")

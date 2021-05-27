@@ -1,0 +1,4 @@
+global:
+  listen_address:   ":8082"
+  cert_file:        ""
+  cert_key:         ""
