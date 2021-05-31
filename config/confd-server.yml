@@ -2,3 +2,17 @@ global:
   listen_address:   ":8082"
   cert_file:        ""
   cert_key:         ""
+
+backends:
+
+  - backend:        "etcd"
+    prefix_urn:     "/api/v2/etcd"
+    nodes:          ["http://127.0.0.1:2379"]
+    username:       ""
+    password:       ""
+
+  - backend:        "consul"
+    prefix_urn:     "/api/v1/consul"
+    nodes:          ["http://127.0.0.1:8500"]
+    username:       ""
+    password:       ""

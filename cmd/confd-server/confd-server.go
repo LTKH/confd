@@ -8,7 +8,9 @@ import (
     "os/signal"
     "runtime"
     "syscall"
+    "strings"
     "gopkg.in/natefinch/lumberjack.v2"
+    "github.com/ltkh/confd/internal/api/v1"
 	"github.com/ltkh/confd/internal/api/v2"
     "github.com/ltkh/confd/internal/config"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -54,18 +56,31 @@ func main() {
         })
     }
 
-    log.Print("[info] confd-server started")
+    for _, back := range cfg.Backends {
 
-    //mux := http.NewServeMux()
+        back.PrefixUrn = strings.TrimRight(back.PrefixUrn, "/")
 
-    etcdClientV2, err := v2.GetEtcdClient()
-    if err != nil {
-        log.Fatalf("[error] %v", err)
+        if back.Backend == "etcd" {
+            etcdClient, err := v2.GetEtcdClient(back)
+            if err != nil {
+                log.Fatalf("[error] %v", err)
+            }
+            http.Handle(back.PrefixUrn+"/", &v2.ApiEtcd{PrefixUrn: back.PrefixUrn, Client: etcdClient})
+        }
+
+        if back.Backend == "consul" {
+            consulClient, err := v1.GetConsulClient(back)
+            if err != nil {
+                log.Fatalf("[error] %v", err)
+            }
+            http.Handle(back.PrefixUrn+"/", &v1.ApiConsul{PrefixUrn: back.PrefixUrn, Client: consulClient})
+        }
+
     }
-    http.Handle("/api/v2/etcd/", &v2.ApiEtcd{etcdClientV2})
-    //mux.Handle("/api/v2/etcd*", &v2.ApiEtcd{etcdClientV2})
 
     http.Handle("/metrics", promhttp.Handler())
+
+    log.Print("[info] confd-server started")
     
 	http.ListenAndServe(cfg.Global.Listen, nil)
 

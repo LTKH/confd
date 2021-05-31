@@ -4,6 +4,7 @@ go 1.15
 
 require (
 	github.com/coreos/etcd v3.3.25+incompatible
+	github.com/hashicorp/consul/api v1.8.1
 	github.com/naoina/go-stringutil v0.1.0 // indirect
 	github.com/naoina/toml v0.1.1
 	github.com/pkg/errors v0.9.1

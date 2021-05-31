@@ -2,38 +2,32 @@ package v2
 
 import (
     "log"
-    //"net"
-    //"fmt"
     "net/http"
     "time"
     "regexp"
     "context"
-    //"sync"
-    //"reflect"
-    //"strconv"
     "strings"
+    "sort"
     //"io/ioutil"
     "encoding/json"
-    //"google.golang.org/grpc/grpclog"
 	"github.com/coreos/etcd/client"
-    //"github.com/ltkh/confd/internal/config"
+    //"github.com/hashicorp/consul/api"
+    "github.com/ltkh/confd/internal/config"
 )
 
-type Response struct {
-    Status         string                 `json:"status"`
-    Error          string                 `json:"error,omitempty"`
-    Warnings       []string               `json:"warnings,omitempty"`
-    Data           interface{}            `json:"data"`
-}
-
 type ApiEtcd struct {
-    Client         client.Client
+    PrefixUrn      string
+    Client         *client.Client
 }
 
-func getNodes(nodes client.Nodes) (map[string]interface{}) {
+func getEtcdNodes(nodes client.Nodes) (map[string]interface{}) {
     jsn := map[string]interface{}{}
 
     if nodes != nil {
+
+        sort.SliceStable(nodes, func(i, j int) bool {
+            return nodes[i].Key < nodes[j].Key
+        })
 
         re := regexp.MustCompile(`.*/([^/]+)$`)
     
@@ -51,7 +45,7 @@ func getNodes(nodes client.Nodes) (map[string]interface{}) {
                 jsn[key] = make(map[string]string, 0)
             }
             if node.Nodes != nil {
-                jsn[key] = getNodes(node.Nodes)
+                jsn[key] = getEtcdNodes(node.Nodes)
             }
         }
 
@@ -60,26 +54,28 @@ func getNodes(nodes client.Nodes) (map[string]interface{}) {
     return jsn
 }
 
-func GetEtcdClient() (client.Client, error) {
+func GetEtcdClient(back config.Backend) (*client.Client, error) {
 
-    cfg := client.Config{
-        Endpoints:               []string{"http://127.0.0.1:2379"},
+    conf := client.Config{
+        Endpoints:               back.Nodes,
+        Username:                back.Username,
+        Password:                back.Password,
         Transport:               client.DefaultTransport,
         HeaderTimeoutPerRequest: 5 * time.Second,
     }
 
-    client, err := client.New(cfg)
+    client, err := client.New(conf)
     if err != nil {
         return nil, err
     }
 
-    return client, nil
+    return &client, nil
 }
 
 func (a *ApiEtcd) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
-    path := strings.Replace(r.URL.Path, "/api/v2/etcd", "", 1)
-    kapi := client.NewKeysAPI(a.Client)
+    path := strings.Replace(r.URL.Path, a.PrefixUrn, "", 1)
+    kapi := client.NewKeysAPI(*a.Client)
 
     if r.Method == http.MethodGet {
         
@@ -103,7 +99,7 @@ func (a *ApiEtcd) ServeHTTP(w http.ResponseWriter, r *http.Request) {
             return
         }
 
-        jsn := getNodes(resp.Node.Nodes)
+        jsn := getEtcdNodes(resp.Node.Nodes)
 
         data, err := json.Marshal(jsn)
 		if err != nil {

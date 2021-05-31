@@ -70,7 +70,7 @@ func NewHttpTemplate(h *HTTPTemplate) *HTTPTemplate {
     return h
 }
 
-func (h *HTTPTemplate) getResponse() ([]byte, error) {
+func (h *HTTPTemplate) httpRequest() ([]byte, error) {
 
     for _, url := range h.URLs {
 
@@ -94,14 +94,6 @@ func (h *HTTPTemplate) getResponse() ([]byte, error) {
             request.Header.Set("Content-Encoding", "gzip")
         }
 
-        for k, v := range h.Headers {
-            if strings.ToLower(k) == "host" {
-                request.Host = v
-            } else {
-                request.Header.Add(k, v)
-            }
-        }
-
         if h.Username != "" || h.Password != "" {
             request.SetBasicAuth(h.Username, h.Password)
         }
@@ -113,13 +105,14 @@ func (h *HTTPTemplate) getResponse() ([]byte, error) {
         }
         defer resp.Body.Close()
 
-        if resp.StatusCode != 200 {
-            log.Printf("[error] %s - received status code %d (%s)", url, resp.StatusCode, http.StatusText(resp.StatusCode))
+        body, err := ioutil.ReadAll(resp.Body)
+
+        if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+            log.Printf("[error] when writing to [%s] received status code: %d", url, resp.StatusCode)
             continue
         }
-
-        body, err := ioutil.ReadAll(resp.Body)
         if err != nil {
+            log.Printf("[error] when writing to [%s] received error: %v", url, err)
             continue
         }
 
@@ -129,9 +122,9 @@ func (h *HTTPTemplate) getResponse() ([]byte, error) {
     return nil, fmt.Errorf("failed to complete any request")
 }
 
-func (h *HTTPTemplate) gatherURL() (bool, error) {
+func (h *HTTPTemplate) gather() (bool, error) {
     
-    body, err := h.getResponse()
+    body, err := h.httpRequest()
     if err != nil {
         return false, err
     }
@@ -323,9 +316,9 @@ func main() {
             go func(tmpl HTTPTemplate) {
                 defer wg.Done()
 
-                http := NewHttpTemplate(&tmpl)
+                newHttp := NewHttpTemplate(&tmpl)
 
-                reload, err := http.gatherURL()
+                reload, err := newHttp.gather()
                 if err != nil {
                     log.Printf("[error] %v", err)
                     if *plugin == "telegraf" {

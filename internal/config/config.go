@@ -6,7 +6,16 @@ import (
 )
 
 type Config struct {
-	Global           *Global            `yaml:"global"`
+	Global           Global             `yaml:"global"`
+	Backends         []Backend          `yaml:"backends"`
+}
+
+type Backend struct {
+	Backend          string             `yaml:"backend"`
+	PrefixUrn        string             `yaml:"prefix_urn"`
+    Nodes            []string           `yaml:"nodes"`
+    Username         string             `yaml:"username"`
+	Password         string             `yaml:"password"`
 }
 
 type Global struct {
