@@ -7,7 +7,7 @@ import (
     "regexp"
     "context"
     "strings"
-    "sort"
+    //"sort"
     //"io/ioutil"
     "encoding/json"
 	"github.com/coreos/etcd/client"
@@ -25,9 +25,9 @@ func getEtcdNodes(nodes client.Nodes) (map[string]interface{}) {
 
     if nodes != nil {
 
-        sort.SliceStable(nodes, func(i, j int) bool {
-            return nodes[i].Key < nodes[j].Key
-        })
+        //sort.SliceStable(nodes, func(i, j int) bool {
+        //    return nodes[i].Key < nodes[j].Key
+        //})
 
         re := regexp.MustCompile(`.*/([^/]+)$`)
     

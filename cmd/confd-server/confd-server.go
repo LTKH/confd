@@ -78,6 +78,7 @@ func main() {
 
     }
 
+    http.Handle("/health", &v1.ApiHealth{})
     http.Handle("/metrics", promhttp.Handler())
 
     log.Print("[info] confd-server started")

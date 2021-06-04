@@ -20,6 +20,10 @@ type ApiConsul struct {
     Client         *api.Client
 }
 
+type ApiHealth struct {
+
+}
+
 func getConsulNodes(nodes api.KVPairs) (map[string]interface{}) {
     jsn := map[string]interface{}{}
 
@@ -54,6 +58,11 @@ func GetConsulClient(back config.Backend) (*api.Client, error) {
 	}
 
 	return client, nil
+}
+
+func (a *ApiHealth) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+    w.Header().Set("Content-Type", "text/plain")
+    w.Write([]byte("OK"))
 }
 
 func (a *ApiConsul) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -101,6 +110,7 @@ func (a *ApiConsul) ServeHTTP(w http.ResponseWriter, r *http.Request) {
             w.Write([]byte(err.Error()))
             return
         }
+        defer r.Body.Close()
 
         p := &api.KVPair{Key: strings.TrimLeft(path, "/"), Flags: 42, Value: body}
         resp, err := clkv.Put(p, nil)
