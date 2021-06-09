@@ -58,14 +58,14 @@ func main() {
 
     for _, back := range cfg.Backends {
 
-        back.PrefixUrn = strings.TrimRight(back.PrefixUrn, "/")
+        back.Id = strings.TrimRight(back.Id, "/")
 
         if back.Backend == "etcd" {
             etcdClient, err := v2.GetEtcdClient(back)
             if err != nil {
                 log.Fatalf("[error] %v", err)
             }
-            http.Handle(back.PrefixUrn+"/", &v2.ApiEtcd{PrefixUrn: back.PrefixUrn, Client: etcdClient})
+            http.Handle("/api/v2/"+back.Id+"/", &v2.ApiEtcd{Id: back.Id, Client: etcdClient})
         }
 
         if back.Backend == "consul" {
@@ -73,7 +73,7 @@ func main() {
             if err != nil {
                 log.Fatalf("[error] %v", err)
             }
-            http.Handle(back.PrefixUrn+"/", &v1.ApiConsul{PrefixUrn: back.PrefixUrn, Client: consulClient})
+            http.Handle("/api/v1/"+back.Id+"/", &v1.ApiConsul{Id: back.Id, Client: consulClient})
         }
 
     }

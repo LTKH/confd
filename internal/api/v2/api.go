@@ -16,7 +16,7 @@ import (
 )
 
 type ApiEtcd struct {
-    PrefixUrn      string
+    Id             string
     Client         *client.Client
 }
 
@@ -74,7 +74,7 @@ func GetEtcdClient(back config.Backend) (*client.Client, error) {
 
 func (a *ApiEtcd) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
-    path := strings.Replace(r.URL.Path, a.PrefixUrn, "", 1)
+    path := strings.Replace(r.URL.Path, "/api/v2/"+a.Id, "", 1)
     kapi := client.NewKeysAPI(*a.Client)
 
     if r.Method == http.MethodGet {

@@ -16,7 +16,7 @@ import (
 )
 
 type ApiConsul struct {
-    PrefixUrn      string
+    Id             string
     Client         *api.Client
 }
 
@@ -28,20 +28,17 @@ func getConsulNodes(nodes api.KVPairs) (map[string]interface{}) {
     jsn := map[string]interface{}{}
     re := regexp.MustCompile(`.*/([^/]+)$`)
 
-    /*
-
     for _, node := range nodes {
-        if len(strings.Split(key, "/")) > level {
-            nds = append(nds, node)
-        }
+        //if len(strings.Split(key, "/")) > level {
+        //    nds = append(nds, node)
+        //}
         key := re.ReplaceAllString(node.Key, "$1")
         jsn[key] = node.Value
     }
 
-    if len(nds) > 0 {
-        getConsulNodes(nds, level+1)
-    }
-    */
+    //if len(nds) > 0 {
+    //    getConsulNodes(nds, level+1)
+    //}
 
     return jsn
 }
@@ -76,7 +73,7 @@ func (a *ApiHealth) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 func (a *ApiConsul) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
-    path := strings.Replace(r.URL.Path, a.PrefixUrn, "", 1)
+    path := strings.Replace(r.URL.Path, "/api/v1/"+a.Id, "", 1)
     clkv := a.Client.KV()
 
     if r.Method == http.MethodGet {
