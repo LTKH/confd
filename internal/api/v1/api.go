@@ -26,13 +26,22 @@ type ApiHealth struct {
 
 func getConsulNodes(nodes api.KVPairs) (map[string]interface{}) {
     jsn := map[string]interface{}{}
-
     re := regexp.MustCompile(`.*/([^/]+)$`)
 
+    /*
+
     for _, node := range nodes {
+        if len(strings.Split(key, "/")) > level {
+            nds = append(nds, node)
+        }
         key := re.ReplaceAllString(node.Key, "$1")
         jsn[key] = node.Value
     }
+
+    if len(nds) > 0 {
+        getConsulNodes(nds, level+1)
+    }
+    */
 
     return jsn
 }

@@ -1,6 +1,6 @@
 module github.com/ltkh/confd
 
-go 1.15
+go 1.16
 
 require (
 	github.com/coreos/etcd v3.3.25+incompatible

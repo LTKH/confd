@@ -12,7 +12,7 @@ type Config struct {
 
 type Backend struct {
 	Backend          string             `yaml:"backend"`
-	PrefixUrn        string             `yaml:"prefix_urn"`
+	Id               string             `yaml:"id"`
     Nodes            []string           `yaml:"nodes"`
     Username         string             `yaml:"username"`
 	Password         string             `yaml:"password"`

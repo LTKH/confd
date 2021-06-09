@@ -82,7 +82,9 @@ func main() {
     http.Handle("/metrics", promhttp.Handler())
 
     log.Print("[info] confd-server started")
-    
-	http.ListenAndServe(cfg.Global.Listen, nil)
+
+    if err := http.ListenAndServe(cfg.Global.Listen, nil); err != nil {
+        log.Fatalf("[error] %v", err)
+    }
 
 }
