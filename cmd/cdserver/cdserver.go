@@ -22,7 +22,7 @@ func main() {
     runtime.GOMAXPROCS(runtime.NumCPU())
 
     //command-line flag parsing
-    cfFile          := flag.String("config", "confd-server.yml", "config file")
+    cfFile          := flag.String("config", "../../config/cdserver.yml", "config file")
     lgFile          := flag.String("logfile", "", "log file")
     logMaxSize      := flag.Int("log.max-size", 1, "log max size") 
     logMaxBackups   := flag.Int("log.max-backups", 3, "log max backups")
@@ -35,7 +35,7 @@ func main() {
     signal.Notify(c, os.Interrupt, syscall.SIGTERM)
     go func() {
         <-c
-        log.Print("[info] confd-server stopped")
+        log.Print("[info] cdserver stopped")
         os.Exit(0)
     }()
 
@@ -81,7 +81,7 @@ func main() {
     http.Handle("/health", &v1.ApiHealth{})
     http.Handle("/metrics", promhttp.Handler())
 
-    log.Print("[info] confd-server started")
+    log.Print("[info] cdserver started")
 
     if err := http.ListenAndServe(cfg.Global.Listen, nil); err != nil {
         log.Fatalf("[error] %v", err)

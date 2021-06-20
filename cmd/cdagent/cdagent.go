@@ -21,7 +21,7 @@ import (
     "encoding/hex"
     "github.com/naoina/toml"
     "gopkg.in/natefinch/lumberjack.v2"
-    "github.com/ltkh/confd/internal/template"
+    "github.com/ltkh/cdagent/internal/template"
 )
 
 type Config struct {
@@ -210,7 +210,7 @@ func main() {
     runtime.GOMAXPROCS(runtime.NumCPU())
 
     //command-line flag parsing
-    cfFile          := flag.String("config", "../../config/config.toml", "config file")
+    cfFile          := flag.String("config", "../../config/cdagent.toml", "config file")
     lgFile          := flag.String("logfile", "", "log file")
     interval        := flag.Int("interval", 30, "interval")
     plugin          := flag.String("plugin", "", "plugin")
@@ -265,7 +265,7 @@ func main() {
         })
     }
 
-    log.Print("[info] confd started -_-")
+    log.Print("[info] cdagent started -_-")
     
     run := true
 
@@ -279,10 +279,10 @@ func main() {
                 case syscall.SIGHUP:
                     run = true
                 case syscall.SIGINT:
-                    log.Print("[info] confd stopped")
+                    log.Print("[info] cdagent stopped")
                     os.Exit(0)
                 case syscall.SIGTERM:
-                    log.Print("[info] confd stopped")
+                    log.Print("[info] cdagent stopped")
                     os.Exit(0)
                 default:
                     log.Print("[info] unknown signal received")
