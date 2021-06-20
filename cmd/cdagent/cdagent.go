@@ -21,7 +21,7 @@ import (
     "encoding/hex"
     "github.com/naoina/toml"
     "gopkg.in/natefinch/lumberjack.v2"
-    "github.com/ltkh/cdagent/internal/template"
+    "github.com/ltkh/confd/internal/template"
 )
 
 type Config struct {
