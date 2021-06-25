@@ -22,7 +22,7 @@ func main() {
     runtime.GOMAXPROCS(runtime.NumCPU())
 
     //command-line flag parsing
-    cfFile          := flag.String("config", "../../config/cdserver.yml", "config file")
+    cfFile          := flag.String("config", "config/cdserver.yml", "config file")
     lgFile          := flag.String("logfile", "", "log file")
     logMaxSize      := flag.Int("log.max-size", 1, "log max size") 
     logMaxBackups   := flag.Int("log.max-backups", 3, "log max backups")
