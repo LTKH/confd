@@ -12,22 +12,22 @@ import (
     "sort"
 )
 
-func isArray(v interface{}) (bool, error) {
+func isArray(v interface{}) bool {
     rt := reflect.TypeOf(v)
     if rt.Kind() == reflect.Array {
-        return true, nil
+        return true
     }
 
-    return false, nil
+    return false
 }
 
-func isSlice(v interface{}) (bool, error) {
+func isSlice(v interface{}) bool {
     rt := reflect.TypeOf(v)
     if rt.Kind() == reflect.Slice {
-        return true, nil
+        return true
     }
 
-    return false, nil
+    return false
 }
 
 func toInt(i interface{}) (int64, error) {
