@@ -38,6 +38,8 @@ func NewTemplate(source string) (*Template, error) {
 
 func (t *Template) Execute(jsn interface{}) (*ExecuteResult, error) {
     funcMap := template.FuncMap{
+        "isArray":         isArray,
+        "isSlice":         isSlice,
         "toInt":           toInt,
         "toFloat":         toFloat,
         "add":             addFunc,
