@@ -25,10 +25,6 @@ func getEtcdNodes(nodes client.Nodes) (map[string]interface{}) {
 
     if nodes != nil {
 
-        //sort.SliceStable(nodes, func(i, j int) bool {
-        //    return nodes[i].Key < nodes[j].Key
-        //})
-
         re := regexp.MustCompile(`.*/([^/]+)$`)
     
         for _, node := range nodes {
