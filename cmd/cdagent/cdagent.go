@@ -322,13 +322,13 @@ func main() {
                 if err != nil {
                     log.Printf("[error] %v", err)
                     if *plugin == "telegraf" {
-                        fmt.Printf("confd,src=%s,dest=%s success=0\n", tmpl.Src, tmpl.Dest)
+                        fmt.Printf("confd,src=%s,dest=%s success=1\n", tmpl.Src, tmpl.Dest)
                     }
                     return
                 }
 
                 if *plugin == "telegraf" {    
-                    fmt.Printf("confd,src=%s,dest=%s success=1\n", tmpl.Src, tmpl.Dest)
+                    fmt.Printf("confd,src=%s,dest=%s success=0\n", tmpl.Src, tmpl.Dest)
                 }
 
                 if reload {
