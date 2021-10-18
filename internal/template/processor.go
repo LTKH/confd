@@ -68,6 +68,7 @@ func (t *Template) Execute(jsn interface{}) (*ExecuteResult, error) {
 		"replaceAll":      replaceAll,
         "lookupIPV4":      lookupIPV4,
 	    "lookupIPV6":      lookupIPV6,
+        "fileExist":       fileExist,
     }
 
     tmpl := template.New(filepath.Base(t.source))

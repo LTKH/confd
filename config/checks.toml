@@ -1,0 +1,5 @@
+[[checks]]
+key = "/test/disabled"
+value = "true"
+file = "/tmp/test"
+interval = "10s"

@@ -25,12 +25,18 @@ import (
 )
 
 type Config struct {
+    Global              Global             `toml:"global"`
     Templates           []HTTPTemplate
+}
+
+type Global struct {
+    URLs                []string           `toml:"urls"`
+	ChecksFile          string             `toml:"checks_file"`
 }
 
 type HTTPTemplate struct {
     URLs                []string           `toml:"urls"`
-    Timeout             time.Duration      `toml:"timeout"`
+    Timeout             string             `toml:"timeout"`
     Src                 string             `toml:"src"`
     Dest                string             `toml:"dest"`
     CheckCmd            string             `toml:"check_cmd"`
@@ -50,18 +56,32 @@ type HTTPTemplate struct {
     client              *http.Client
 }
 
+type Checks struct {
+    Checks              []Check            `toml:"checks"`
+}
+
+type Check struct {
+    Key                 string             `toml:"key"`
+    Value               string             `toml:"value"`
+    File                string             `toml:"file"`
+    Interval            string             `toml:"interval"`
+    Timeout             string             `toml:"timeout"`
+}
+
 func NewHttpTemplate(h *HTTPTemplate) *HTTPTemplate {
 
     // Set default timeout
-    if h.Timeout == 0 {
-        h.Timeout = 5000
+    if h.Timeout == "" {
+        h.Timeout = "10s"
     }
+
+    timeout, _ := time.ParseDuration(h.Timeout)
 
     h.client = &http.Client{
         Transport: &http.Transport{
             Proxy:           http.ProxyFromEnvironment,
         },
-        //Timeout: h.Timeout,
+        Timeout: timeout,
     }
 
     rand.Seed(time.Now().UnixNano())
@@ -290,7 +310,7 @@ func main() {
         }
     }()
 
-    //loading configuration file
+    // loading configuration file
     f, err := os.Open(*cfFile)
     if err != nil {
         log.Fatalf("[error] reading config file: %v", err)
@@ -301,6 +321,48 @@ func main() {
     if err := toml.NewDecoder(f).Decode(&cfg); err != nil {
         log.Fatalf("[error] parsing config file: %v", err)
     }
+
+    /*
+    // loading checks file
+    if cfg.Global.ChecksFile != "" {
+        f, err := os.Open(cfg.Global.ChecksFile)
+        if err != nil {
+            log.Fatalf("[error] reading checks file: %v", err)
+        }
+        defer f.Close()
+
+        var chs Checks
+        if err := toml.NewDecoder(f).Decode(&chs); err != nil {
+            log.Fatalf("[error] parsing checks file: %v", err)
+        }
+
+        for _, c := range chs.Checks {
+            go func(c Check) {
+                for {
+
+                    if c.Interval == "" {
+                        c.Interval = "60s"
+                    }
+                    interval, err := time.ParseDuration(c.Interval)
+                    if err != nil {
+                        log.Printf("[error] parsing check interval %v", err)
+                        return
+                    }
+
+                    // check file exists
+                    if c.File != "" {
+                        _, err := os.Stat(c.File)
+			            if os.IsNotExist(err) {
+                            log.Printf("[warn] file %q not found", c.File)
+                        }
+                    }
+                    
+                    time.Sleep(interval)
+                }
+            }(c)
+        }
+    }
+    */
 
     // Daemon mode
     for (run) {

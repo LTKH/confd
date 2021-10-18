@@ -10,6 +10,7 @@ import (
     "time"
     "net"
     "sort"
+    "os"
 )
 
 func isArray(v interface{}) bool {
@@ -200,4 +201,12 @@ func lookupIPV4(data string) []string {
 		}
 	}
 	return addresses
+}
+
+func fileExist(f string) bool {
+    _, err := os.Stat(f)
+    if os.IsNotExist(err) {
+        return false
+    }
+    return true
 }
