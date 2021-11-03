@@ -36,6 +36,7 @@ type Global struct {
 
 type HTTPTemplate struct {
     URLs                []string           `toml:"urls"`
+    Key                 string             `toml:"key"`
     Timeout             string             `toml:"timeout"`
     Src                 string             `toml:"src"`
     Dest                string             `toml:"dest"`
@@ -64,7 +65,7 @@ type Check struct {
     Key                 string             `toml:"key"`
     Value               string             `toml:"value"`
     File                string             `toml:"file"`
-    Interval            string             `toml:"interval"`
+    Http                string             `toml:"http"`
     Timeout             string             `toml:"timeout"`
 }
 
@@ -127,7 +128,7 @@ func (h *HTTPTemplate) httpRequest() ([]byte, error) {
 
         body, err := ioutil.ReadAll(resp.Body)
 
-        if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+        if resp.StatusCode >= 300 {
             log.Printf("[error] when writing to [%s] received status code: %d", url, resp.StatusCode)
             continue
         }
@@ -142,49 +143,49 @@ func (h *HTTPTemplate) httpRequest() ([]byte, error) {
     return nil, fmt.Errorf("failed to complete any request")
 }
 
-func (h *HTTPTemplate) gather() (bool, error) {
+func (h *HTTPTemplate) gather() (int, error) {
     
     body, err := h.httpRequest()
     if err != nil {
-        return false, err
+        return 2, err
     }
 
     var jsn interface{}
     if err := json.Unmarshal(body, &jsn); err != nil {
-        return false, fmt.Errorf("reading json from response body: %v", err)
+        return 3, fmt.Errorf("reading json from response body: %v", err)
     }
 
     tmpl, err := template.NewTemplate(h.Src)
     if err != nil {
-        log.Fatalf("[error] %v", err)
+        return 3, fmt.Errorf("[error] %v", err)
     }
 
     cont, err := tmpl.Execute(jsn)
     if err != nil {
-        return false, fmt.Errorf("generating config: %v", err)
+        return 3, fmt.Errorf("generating config: %v", err)
     }
 
     if _, err := os.Stat(h.Dest); err == nil {
         conf, err := ioutil.ReadFile(h.Dest)
         if err != nil {
-            return false, fmt.Errorf("reading config file %s: %v", h.Dest, err)
+            return 4, fmt.Errorf("reading config file %s: %v", h.Dest, err)
         }
         if getHash(conf) != getHash(cont.Output) {
             if err := ioutil.WriteFile(h.Dest, cont.Output, 0644); err != nil {
-                return false, fmt.Errorf("writing config file %s: %v", h.Dest, err)
+                return 4, fmt.Errorf("writing config file %s: %v", h.Dest, err)
             }
-            return true, nil
+            return 1, nil
         }
     } else if os.IsNotExist(err) {
         if err := ioutil.WriteFile(h.Dest, cont.Output, 0644); err != nil {
-            return false, fmt.Errorf("writing config file %s: %v", h.Dest, err)
+            return 4, fmt.Errorf("writing config file %s: %v", h.Dest, err)
         }
-        return true, nil
+        return 1, nil
     } else {
-        return false, fmt.Errorf("reading config file status %s: %v", h.Dest, err)
+        return 4, fmt.Errorf("reading config file status %s: %v", h.Dest, err)
     }
 
-    return false, nil
+    return 0, nil
 }
 
 func getHash(data []byte) string {
@@ -222,6 +223,42 @@ func runCommand(scmd string, timeout time.Duration) ([]byte, error) {
 
     log.Printf("[info] finished '%s'", scmd)
     return out, nil
+}
+
+// loading configuration file
+func loadConfigFile(file string) (Config, error) {
+    var cfg Config
+
+    f, err := os.Open(file)
+    if err != nil {
+        return cfg, err
+    }
+    
+    if err := toml.NewDecoder(f).Decode(&cfg); err != nil {
+        return cfg, err
+    }
+
+    f.Close()
+
+    return cfg, nil
+}
+
+// loading checks file
+func loadChecksFile(file string) (Checks, error) {
+    var chs Checks
+
+    f, err := os.Open(file)
+    if err != nil {
+        return chs, err
+    }
+
+    if err := toml.NewDecoder(f).Decode(&chs); err != nil {
+        return chs, err
+    }
+
+    f.Close()
+
+    return chs, nil
 }
 
 func main() {
@@ -311,58 +348,10 @@ func main() {
     }()
 
     // loading configuration file
-    f, err := os.Open(*cfFile)
+    cfg, err := loadConfigFile(*cfFile)
     if err != nil {
         log.Fatalf("[error] reading config file: %v", err)
     }
-    defer f.Close()
-    
-    var cfg Config
-    if err := toml.NewDecoder(f).Decode(&cfg); err != nil {
-        log.Fatalf("[error] parsing config file: %v", err)
-    }
-
-    /*
-    // loading checks file
-    if cfg.Global.ChecksFile != "" {
-        f, err := os.Open(cfg.Global.ChecksFile)
-        if err != nil {
-            log.Fatalf("[error] reading checks file: %v", err)
-        }
-        defer f.Close()
-
-        var chs Checks
-        if err := toml.NewDecoder(f).Decode(&chs); err != nil {
-            log.Fatalf("[error] parsing checks file: %v", err)
-        }
-
-        for _, c := range chs.Checks {
-            go func(c Check) {
-                for {
-
-                    if c.Interval == "" {
-                        c.Interval = "60s"
-                    }
-                    interval, err := time.ParseDuration(c.Interval)
-                    if err != nil {
-                        log.Printf("[error] parsing check interval %v", err)
-                        return
-                    }
-
-                    // check file exists
-                    if c.File != "" {
-                        _, err := os.Stat(c.File)
-			            if os.IsNotExist(err) {
-                            log.Printf("[warn] file %q not found", c.File)
-                        }
-                    }
-                    
-                    time.Sleep(interval)
-                }
-            }(c)
-        }
-    }
-    */
 
     // Daemon mode
     for (run) {
@@ -377,30 +366,32 @@ func main() {
             wg.Add(1)
             go func(tmpl HTTPTemplate) {
                 defer wg.Done()
+                
+                if len(tmpl.URLs) == 0 {
+                    for _, u := range cfg.Global.URLs {
+                        tmpl.URLs = append(tmpl.URLs, u+tmpl.Key)
+                    }
+                }
 
                 newHttp := NewHttpTemplate(&tmpl)
-
                 reload, err := newHttp.gather()
+                
+                if *plugin == "telegraf" {    
+                    fmt.Printf("confd,src=%s,dest=%s success=%d\n", tmpl.Src, tmpl.Dest, reload)
+                }
+
                 if err != nil {
                     log.Printf("[error] %v", err)
-                    if *plugin == "telegraf" {
-                        fmt.Printf("confd,src=%s,dest=%s success=1\n", tmpl.Src, tmpl.Dest)
-                    }
                     return
                 }
 
-                if *plugin == "telegraf" {    
-                    fmt.Printf("confd,src=%s,dest=%s success=0\n", tmpl.Src, tmpl.Dest)
-                }
-
-                if reload {
+                if reload == 1 {
                     if tmpl.ReloadCmd != "" {
                         runCommand(tmpl.ReloadCmd, 5)
                     }
                 } 
             }(t)
         }
-
         wg.Wait()
 
         time.Sleep(time.Duration(*interval) * time.Second)

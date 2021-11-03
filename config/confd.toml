@@ -1,4 +1,8 @@
+[global]
+urls = ["http://localhost:8080"]
+checks_file = "config/checks.toml"
+
 [[templates]]
-urls = ["http://localhost:8080/test.json"]
+key = "/test.json"
 src = "config/inputs.tmpl"
 dest = "/tmp/localhost.conf"

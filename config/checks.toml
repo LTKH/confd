@@ -2,4 +2,4 @@
 key = "/test/disabled"
 value = "true"
 file = "/tmp/test"
-interval = "10s"
+http = "http://localhost:8090/test.json"
