@@ -13,25 +13,25 @@ import (
 // The template retains the relationship between it's contents and is
 // responsible for it's own execution.
 type Template struct {
-	// contents is the string contents for the template. It is either given
-	// during template creation or read from disk when initialized.
-	contents string
+    // contents is the string contents for the template. It is either given
+    // during template creation or read from disk when initialized.
+    contents string
 
-	// source is the original location of the template. This may be undefined if
-	// the template was dynamically defined.
-	source string
+    // source is the original location of the template. This may be undefined if
+    // the template was dynamically defined.
+    source string
 }
 
 // ExecuteResult is the result of the template execution.
 type ExecuteResult struct {
-	// Output is the rendered result.
-	Output []byte
+    // Output is the rendered result.
+    Output []byte
 }
 
 func NewTemplate(source string) (*Template, error) {
 
     var t Template
-	t.source = source
+    t.source = source
 
     return &t, nil
 }
@@ -64,10 +64,10 @@ func (t *Template) Execute(jsn interface{}) (*ExecuteResult, error) {
         "mul":             func(a, b int) int { return a * b },
         "connectHttp":     connectHttpFunc,
         "regexReplaceAll": regexReplaceAll,
-		"regexMatch":      regexMatch,
-		"replaceAll":      replaceAll,
+        "regexMatch":      regexMatch,
+        "replaceAll":      replaceAll,
         "lookupIPV4":      lookupIPV4,
-	    "lookupIPV6":      lookupIPV6,
+        "lookupIPV6":      lookupIPV6,
         "fileExist":       fileExist,
     }
 
@@ -75,17 +75,17 @@ func (t *Template) Execute(jsn interface{}) (*ExecuteResult, error) {
     tmpl.Funcs(funcMap)
 
     tmpl, err := tmpl.ParseFiles(t.source)
-	if err != nil {
-		return nil, errors.Wrap(err, "parse")
-	}
+    if err != nil {
+        return nil, errors.Wrap(err, "parse")
+    }
 
-	// Execute the template into the writer
-	var b bytes.Buffer
-	if err := tmpl.Execute(&b, &jsn); err != nil {
-		return nil, errors.Wrap(err, "execute")
-	}
+    // Execute the template into the writer
+    var b bytes.Buffer
+    if err := tmpl.Execute(&b, &jsn); err != nil {
+        return nil, errors.Wrap(err, "execute")
+    }
 
     return &ExecuteResult{
-		Output:  b.Bytes(),
-	}, nil
+        Output:  b.Bytes(),
+    }, nil
 }

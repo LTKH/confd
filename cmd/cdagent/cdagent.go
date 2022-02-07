@@ -14,11 +14,13 @@ import (
     "context"
     "encoding/json"
     "io/ioutil"
+    //"path/filepath"
     "math/rand"
     "strings"
     "net/http"
     "crypto/md5"
     "encoding/hex"
+    //"text/template"
     "github.com/naoina/toml"
     "gopkg.in/natefinch/lumberjack.v2"
     "github.com/ltkh/confd/internal/template"
@@ -39,6 +41,7 @@ type HTTPTemplate struct {
     Key                 string             `toml:"key"`
     Timeout             string             `toml:"timeout"`
     Src                 string             `toml:"src"`
+    Temp                string             `toml:"temp"`
     Dest                string             `toml:"dest"`
     CheckCmd            string             `toml:"check_cmd"`
     ReloadCmd           string             `toml:"reload_cmd"`
@@ -54,6 +57,7 @@ type HTTPTemplate struct {
     // Absolute path to file with Bearer token
     BearerToken         string             `toml:"bearer_token"`
 
+    funcMap             map[string]interface{}
     client              *http.Client
 }
 
@@ -143,21 +147,33 @@ func (h *HTTPTemplate) httpRequest() ([]byte, error) {
     return nil, fmt.Errorf("failed to complete any request")
 }
 
-func (h *HTTPTemplate) gather() (int, error) {
+func (h *HTTPTemplate) Gather() (interface{}, error) {
     
     body, err := h.httpRequest()
     if err != nil {
-        return 2, err
+        return nil, err
     }
 
     var jsn interface{}
     if err := json.Unmarshal(body, &jsn); err != nil {
-        return 3, fmt.Errorf("reading json from response body: %v", err)
+        return nil, fmt.Errorf("reading json from response body: %v", err)
     }
+
+    return jsn, nil
+
+}
+
+func getHash(data []byte) string {
+    hsh := md5.New()
+    hsh.Write(data)
+    return hex.EncodeToString(hsh.Sum(nil))
+}
+
+func (h *HTTPTemplate) CreateConf(jsn interface{}) (int, error) {
 
     tmpl, err := template.NewTemplate(h.Src)
     if err != nil {
-        return 3, fmt.Errorf("[error] %v", err)
+        return 3, fmt.Errorf("reading template: %v", err)
     }
 
     cont, err := tmpl.Execute(jsn)
@@ -171,13 +187,13 @@ func (h *HTTPTemplate) gather() (int, error) {
             return 4, fmt.Errorf("reading config file %s: %v", h.Dest, err)
         }
         if getHash(conf) != getHash(cont.Output) {
-            if err := ioutil.WriteFile(h.Dest, cont.Output, 0644); err != nil {
+            if err := ioutil.WriteFile(h.Temp, cont.Output, 0644); err != nil {
                 return 4, fmt.Errorf("writing config file %s: %v", h.Dest, err)
             }
             return 1, nil
         }
     } else if os.IsNotExist(err) {
-        if err := ioutil.WriteFile(h.Dest, cont.Output, 0644); err != nil {
+        if err := ioutil.WriteFile(h.Temp, cont.Output, 0644); err != nil {
             return 4, fmt.Errorf("writing config file %s: %v", h.Dest, err)
         }
         return 1, nil
@@ -186,12 +202,6 @@ func (h *HTTPTemplate) gather() (int, error) {
     }
 
     return 0, nil
-}
-
-func getHash(data []byte) string {
-    hsh := md5.New()
-    hsh.Write(data)
-    return hex.EncodeToString(hsh.Sum(nil))
 }
 
 func runCommand(scmd string, timeout time.Duration) ([]byte, error) {
@@ -362,35 +372,80 @@ func main() {
 
         var wg sync.WaitGroup
 
-        for _, t := range cfg.Templates {
+        for _, tmpl := range cfg.Templates {
             wg.Add(1)
-            go func(tmpl HTTPTemplate) {
+            go func(t HTTPTemplate) {
                 defer wg.Done()
                 
-                if len(tmpl.URLs) == 0 {
+                if len(t.URLs) == 0 {
                     for _, u := range cfg.Global.URLs {
-                        tmpl.URLs = append(tmpl.URLs, u+tmpl.Key)
+                        t.URLs = append(t.URLs, u+t.Key)
                     }
                 }
 
-                newHttp := NewHttpTemplate(&tmpl)
-                reload, err := newHttp.gather()
-                
-                if *plugin == "telegraf" {    
-                    fmt.Printf("confd,src=%s,dest=%s success=%d\n", tmpl.Src, tmpl.Dest, reload)
+                if t.Temp == "" {
+                    t.Temp = t.Dest
                 }
 
+                newTemplate := NewHttpTemplate(&t)
+
+                jsn, err := newTemplate.Gather()
                 if err != nil {
                     log.Printf("[error] %v", err)
+                    if *plugin == "telegraf" {    
+                        fmt.Printf("confd,src=%s,dest=%s success=%d\n", t.Src, t.Dest, 1)
+                    }
                     return
                 }
 
-                if reload == 1 {
-                    if tmpl.ReloadCmd != "" {
-                        runCommand(tmpl.ReloadCmd, 5)
+                succ, err := newTemplate.CreateConf(jsn)
+                if err != nil {
+                    log.Printf("[error] %v", err)
+                    if *plugin == "telegraf" {    
+                        fmt.Printf("confd,src=%s,dest=%s success=%d\n", t.Src, t.Dest, succ)
                     }
-                } 
-            }(t)
+                    return
+                }
+
+                if succ == 1 {
+                    if t.CheckCmd != "" {
+                        _, err := runCommand(t.CheckCmd, 10)
+                        if err != nil {
+                            log.Printf("[error] %v", err)
+                            if *plugin == "telegraf" {
+                                fmt.Printf("confd,src=%s,dest=%s success=%d\n", t.Src, t.Dest, 3)
+                            }
+                            return
+                        } 
+                    }
+
+                    if t.Temp != t.Dest {
+                        err := os.Rename(t.Temp, t.Dest)
+                        if err != nil {
+                            log.Printf("[error] %v", err)
+                            if *plugin == "telegraf" {
+                                fmt.Printf("confd,src=%s,dest=%s success=%d\n", t.Src, t.Dest, 3)
+                            }
+                            return
+                        }
+                    }
+
+                    if *plugin == "telegraf" {
+                        fmt.Printf("confd,src=%s,dest=%s success=%d\n", t.Src, t.Dest, 1)
+                    }
+
+                    if t.ReloadCmd != "" {
+                        runCommand(t.ReloadCmd, 10)
+                    }
+
+                    return
+                }
+
+                if *plugin == "telegraf" {
+                    fmt.Printf("confd,src=%s,dest=%s success=%d\n", t.Src, t.Dest, 0)
+                }
+
+            }(tmpl)
         }
         wg.Wait()
 
