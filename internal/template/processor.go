@@ -13,31 +13,14 @@ import (
 // The template retains the relationship between it's contents and is
 // responsible for it's own execution.
 type Template struct {
-    // contents is the string contents for the template. It is either given
-    // during template creation or read from disk when initialized.
-    contents string
-
-    // source is the original location of the template. This may be undefined if
-    // the template was dynamically defined.
-    source string
+    contents  string
+    funcMap   template.FuncMap
 }
 
-// ExecuteResult is the result of the template execution.
-type ExecuteResult struct {
-    // Output is the rendered result.
-    Output []byte
-}
-
-func NewTemplate(source string) (*Template, error) {
+func NewTemplate() (*Template, error) {
 
     var t Template
-    t.source = source
-
-    return &t, nil
-}
-
-func (t *Template) Execute(jsn interface{}) (*ExecuteResult, error) {
-    funcMap := template.FuncMap{
+    t.funcMap = template.FuncMap{
         "isArray":         isArray,
         "isSlice":         isSlice,
         "toInt":           toInt,
@@ -69,12 +52,15 @@ func (t *Template) Execute(jsn interface{}) (*ExecuteResult, error) {
         "lookupIPV4":      lookupIPV4,
         "lookupIPV6":      lookupIPV6,
         "fileExist":       fileExist,
+        "hostname":        hostname,
     }
 
-    tmpl := template.New(filepath.Base(t.source))
-    tmpl.Funcs(funcMap)
+    return &t, nil
+}
 
-    tmpl, err := tmpl.ParseFiles(t.source)
+func (t *Template) Execute(source string, jsn interface{}) ([]byte, error) {
+
+    tmpl, err := template.New("new").Funcs(t.funcMap).Parse(source)
     if err != nil {
         return nil, errors.Wrap(err, "parse")
     }
@@ -85,7 +71,24 @@ func (t *Template) Execute(jsn interface{}) (*ExecuteResult, error) {
         return nil, errors.Wrap(err, "execute")
     }
 
-    return &ExecuteResult{
-        Output:  b.Bytes(),
-    }, nil
+    return b.Bytes(), nil
+}
+
+func (t *Template) ParseFile(source string, jsn interface{}) ([]byte, error) {
+
+    tmpl := template.New(filepath.Base(source))
+    tmpl.Funcs(t.funcMap)
+
+    tmpl, err := tmpl.ParseFiles(source)
+    if err != nil {
+        return nil, errors.Wrap(err, "parse")
+    }
+
+    // Execute the template into the writer
+    var b bytes.Buffer
+    if err := tmpl.Execute(&b, &jsn); err != nil {
+        return nil, errors.Wrap(err, "execute")
+    }
+
+    return b.Bytes(), nil
 }

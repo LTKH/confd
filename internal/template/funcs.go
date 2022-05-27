@@ -210,3 +210,12 @@ func fileExist(f string) bool {
     }
     return true
 }
+
+func hostname() (string, error) {
+    hostname, err := os.Hostname()
+	if err != nil {
+		return "", err
+	}
+
+    return hostname, nil
+}

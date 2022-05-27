@@ -99,16 +99,28 @@ func (h *HTTPTemplate) httpRequest() ([]byte, error) {
 
     for _, url := range h.URLs {
 
-        request, err := http.NewRequest("GET", url, nil)
+        tmpl, err := template.NewTemplate()
         if err != nil {
-            log.Printf("[error] %s - %v", url, err)
+            log.Printf("[error] %v", err)
+            continue
+        }
+
+        path, err := tmpl.Execute(url, nil)
+        if err != nil {
+            log.Printf("[error] %v", err)
+            continue
+        }
+
+        request, err := http.NewRequest("GET", string(path), nil)
+        if err != nil {
+            log.Printf("[error] %v", err)
             continue
         }
 
         if h.BearerToken != "" {
             token, err := ioutil.ReadFile(h.BearerToken)
             if err != nil {
-                log.Printf("[error] %s - %v", url, err)
+                log.Printf("[error] %v", err)
                 continue
             }
             bearer := "Bearer " + strings.Trim(string(token), "\n")
@@ -125,7 +137,7 @@ func (h *HTTPTemplate) httpRequest() ([]byte, error) {
 
         resp, err := h.client.Do(request)
         if err != nil {
-            log.Printf("[error] %s - %v", url, err)
+            log.Printf("[error] %v", err)
             continue
         }
         defer resp.Body.Close()
@@ -133,11 +145,11 @@ func (h *HTTPTemplate) httpRequest() ([]byte, error) {
         body, err := ioutil.ReadAll(resp.Body)
 
         if resp.StatusCode >= 300 {
-            log.Printf("[error] when writing to [%s] received status code: %d", url, resp.StatusCode)
+            log.Printf("[error] %s - received status code: %d", url, resp.StatusCode)
             continue
         }
         if err != nil {
-            log.Printf("[error] when writing to [%s] received error: %v", url, err)
+            log.Printf("[error] %s - received error: %v", url, err)
             continue
         }
 
@@ -171,12 +183,12 @@ func getHash(data []byte) string {
 
 func (h *HTTPTemplate) CreateConf(jsn interface{}) (int, error) {
 
-    tmpl, err := template.NewTemplate(h.Src)
+    tmpl, err := template.NewTemplate()
     if err != nil {
         return 3, fmt.Errorf("reading template: %v", err)
     }
 
-    cont, err := tmpl.Execute(jsn)
+    cont, err := tmpl.ParseFile(h.Src, jsn)
     if err != nil {
         return 3, fmt.Errorf("generating config: %v", err)
     }
@@ -186,14 +198,14 @@ func (h *HTTPTemplate) CreateConf(jsn interface{}) (int, error) {
         if err != nil {
             return 4, fmt.Errorf("reading config file %s: %v", h.Dest, err)
         }
-        if getHash(conf) != getHash(cont.Output) {
-            if err := ioutil.WriteFile(h.Temp, cont.Output, 0644); err != nil {
+        if getHash(conf) != getHash(cont) {
+            if err := ioutil.WriteFile(h.Temp, cont, 0644); err != nil {
                 return 4, fmt.Errorf("writing config file %s: %v", h.Dest, err)
             }
             return 1, nil
         }
     } else if os.IsNotExist(err) {
-        if err := ioutil.WriteFile(h.Temp, cont.Output, 0644); err != nil {
+        if err := ioutil.WriteFile(h.Temp, cont, 0644); err != nil {
             return 4, fmt.Errorf("writing config file %s: %v", h.Dest, err)
         }
         return 1, nil
@@ -294,7 +306,7 @@ func main() {
 
     // Generate configuration
     if *srcFile != "" {
-        tmpl, err := template.NewTemplate(*srcTmpl)
+        tmpl, err := template.NewTemplate()
         if err != nil {
             log.Fatalf("[error] generating template: %v", err)
         }
@@ -309,12 +321,12 @@ func main() {
             log.Fatalf("[error] parsing json file: %v", err)
         }
 
-        cont, err := tmpl.Execute(jsn)
+        cont, err := tmpl.ParseFile(*srcTmpl, jsn)
         if err != nil {
             log.Fatalf("[error] generating config file: %v", err)
         }
 
-        if err := ioutil.WriteFile(*destFile, cont.Output, 0644); err != nil {
+        if err := ioutil.WriteFile(*destFile, cont, 0644); err != nil {
             log.Fatalf("[error] writing config file: %v", err)
         }
 
@@ -447,6 +459,7 @@ func main() {
 
             }(tmpl)
         }
+        
         wg.Wait()
 
         time.Sleep(time.Duration(*interval) * time.Second)
