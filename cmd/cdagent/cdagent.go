@@ -290,12 +290,12 @@ func main() {
 
     //command-line flag parsing
     cfFile          := flag.String("config", "config/confd.toml", "config file")
-    lgFile          := flag.String("logfile", "", "log file")
     interval        := flag.Int("interval", 30, "interval")
     plugin          := flag.String("plugin", "", "plugin")
-    logMaxSize      := flag.Int("log.max-size", 1, "log max size") 
-    logMaxBackups   := flag.Int("log.max-backups", 3, "log max backups")
-    logMaxAge       := flag.Int("log.max-age", 10, "log max age")
+    lgFile          := flag.String("logfile", "", "log file")
+    logMaxSize      := flag.Int("log.maxSize", 1, "log max size") 
+    logMaxBackups   := flag.Int("log.maxBackups", 3, "log max backups")
+    logMaxAge       := flag.Int("log.maxAge", 10, "log max age")
     logCompress     := flag.Bool("log.compress", true, "log compress")
 
     srcFile         := flag.String("src-file", "", "source file")

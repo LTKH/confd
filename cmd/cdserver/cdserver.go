@@ -22,12 +22,13 @@ func main() {
     runtime.GOMAXPROCS(runtime.NumCPU())
 
     //command-line flag parsing
-    cfFile          := flag.String("config", "config/cdserver.yml", "config file")
-    lgFile          := flag.String("logfile", "", "log file")
-    logMaxSize      := flag.Int("log.max-size", 1, "log max size") 
-    logMaxBackups   := flag.Int("log.max-backups", 3, "log max backups")
-    logMaxAge       := flag.Int("log.max-age", 10, "log max age")
-    logCompress     := flag.Bool("log.compress", true, "log compress")
+    lsAddress      := flag.String("httpListenAddr", ":8083", "listen address")
+    cfFile         := flag.String("config", "config/cdserver.yml", "config file")
+    lgFile         := flag.String("logfile", "", "log file")
+    logMaxSize     := flag.Int("log.maxSize", 1, "log max size")
+    logMaxBackups  := flag.Int("log.maxBackups", 3, "log max backups")
+    logMaxAge      := flag.Int("log.maxAge", 10, "log max age")
+    logCompress    := flag.Bool("log.compress", true, "log compress")
     flag.Parse()
 
 	//program completion signal processing
@@ -83,8 +84,14 @@ func main() {
 
     log.Print("[info] cdserver started")
 
-    if err := http.ListenAndServe(cfg.Global.Listen, nil); err != nil {
-        log.Fatalf("[error] %v", err)
+    if cfg.CertFile != "" && cfg.CertKey != "" {
+        if err := http.ListenAndServeTLS(*lsAddress, cfg.CertFile, cfg.CertKey, nil); err != nil {
+            log.Fatalf("[error] %v", err)
+        }
+    } else {
+        if err := http.ListenAndServe(*lsAddress, nil); err != nil {
+            log.Fatalf("[error] %v", err)
+        }
     }
 
 }

@@ -1,5 +1,4 @@
 global:
-  listen_address:   ":8083"
   cert_file:        ""
   cert_key:         ""
 

@@ -19,7 +19,6 @@ type Backend struct {
 }
 
 type Global struct {
-	Listen           string             `yaml:"listen_address"`
 	Cert_file        string             `yaml:"cert_file"`
 	Cert_key         string             `yaml:"cert_key"`
 }
