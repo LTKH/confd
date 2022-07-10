@@ -1,37 +1,34 @@
 package main
 
 import (
+    "net/http"
+    _ "net/http/pprof"
     "flag"
     "log"
-    "net/http"
     "os"
     "os/signal"
-    "runtime"
     "syscall"
     "strings"
     "gopkg.in/natefinch/lumberjack.v2"
+    "github.com/prometheus/client_golang/prometheus/promhttp"
     "github.com/ltkh/confd/internal/api/v1"
 	"github.com/ltkh/confd/internal/api/v2"
     "github.com/ltkh/confd/internal/config"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 func main() {
 
-    //limits the number of operating system threads
-    runtime.GOMAXPROCS(runtime.NumCPU())
-
-    //command-line flag parsing
-    lsAddress      := flag.String("httpListenAddr", ":8083", "listen address")
-    cfFile         := flag.String("config", "config/cdserver.yml", "config file")
-    lgFile         := flag.String("logfile", "", "log file")
-    logMaxSize     := flag.Int("log.maxSize", 1, "log max size")
-    logMaxBackups  := flag.Int("log.maxBackups", 3, "log max backups")
-    logMaxAge      := flag.Int("log.maxAge", 10, "log max age")
+    // Command-line flag parsing
+    lsAddress      := flag.String("web.listen-address", ":8083", "listen address")
+    cfFile         := flag.String("config.file", "config/config.yml", "config file")
+    lgFile         := flag.String("log.file", "", "log file")
+    logMaxSize     := flag.Int("log.max-size", 1, "log max size") 
+    logMaxBackups  := flag.Int("log.max-backups", 3, "log max backups")
+    logMaxAge      := flag.Int("log.max-age", 10, "log max age")
     logCompress    := flag.Bool("log.compress", true, "log compress")
     flag.Parse()
 
-	//program completion signal processing
+	// Program completion signal processing
     c := make(chan os.Signal, 2)
     signal.Notify(c, os.Interrupt, syscall.SIGTERM)
     go func() {
@@ -40,13 +37,13 @@ func main() {
         os.Exit(0)
     }()
 
-    //loading configuration file
+    // Loading configuration file
     cfg, err := config.LoadConfigFile(*cfFile)
     if err != nil {
         log.Fatalf("[error] loading configuration file: %v", err)
     }
 
-	//logging settings
+	// Logging settings
     if *lgFile != "" {
         log.SetOutput(&lumberjack.Logger{
             Filename:   *lgFile,
@@ -56,6 +53,11 @@ func main() {
             Compress:   *logCompress,   // using gzip
         })
     }
+
+    http.HandleFunc("/-/healthy", func (w http.ResponseWriter, r *http.Request) {
+        w.Header().Set("Content-Type", "text/plain")
+        w.Write([]byte("OK"))
+    })
 
     for _, back := range cfg.Backends {
 
@@ -79,13 +81,12 @@ func main() {
 
     }
 
-    http.Handle("/health", &v1.ApiHealth{})
     http.Handle("/metrics", promhttp.Handler())
 
     log.Print("[info] cdserver started")
 
-    if cfg.CertFile != "" && cfg.CertKey != "" {
-        if err := http.ListenAndServeTLS(*lsAddress, cfg.CertFile, cfg.CertKey, nil); err != nil {
+    if cfg.Global.CertFile != "" && cfg.Global.CertKey != "" {
+        if err := http.ListenAndServeTLS(*lsAddress, cfg.Global.CertFile, cfg.Global.CertKey, nil); err != nil {
             log.Fatalf("[error] %v", err)
         }
     } else {

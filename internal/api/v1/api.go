@@ -3,14 +3,10 @@ package v1
 import (
     "log"
     "net/http"
-    //"time"
     "regexp"
-    //"context"
     "strings"
-    //"sort"
     "io/ioutil"
     "encoding/json"
-	//"github.com/coreos/etcd/client"
     "github.com/hashicorp/consul/api"
     "github.com/ltkh/confd/internal/config"
 )
@@ -18,10 +14,6 @@ import (
 type ApiConsul struct {
     Id             string
     Client         *api.Client
-}
-
-type ApiHealth struct {
-
 }
 
 func getConsulNodes(nodes api.KVPairs) (map[string]interface{}) {
@@ -78,11 +70,6 @@ func GetConsulClient(back config.Backend) (*api.Client, error) {
 	}
 
 	return client, nil
-}
-
-func (a *ApiHealth) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-    w.Header().Set("Content-Type", "text/plain")
-    w.Write([]byte("OK"))
 }
 
 func (a *ApiConsul) ServeHTTP(w http.ResponseWriter, r *http.Request) {

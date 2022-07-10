@@ -6,173 +6,70 @@ import (
     "os"
     "os/signal"
     "syscall"
-    "runtime"
     "flag"
     "sync"
     "fmt"
+    "runtime"
     "os/exec"
     "context"
     "encoding/json"
     "io/ioutil"
-    //"path/filepath"
     "math/rand"
-    "strings"
-    "net/http"
     "crypto/md5"
     "encoding/hex"
-    //"text/template"
     "github.com/naoina/toml"
     "gopkg.in/natefinch/lumberjack.v2"
     "github.com/ltkh/confd/internal/template"
+    "github.com/ltkh/confd/internal/client"
+)
+
+var (
+    httpClient = client.NewHttpClient()
 )
 
 type Config struct {
-    Global              Global             `toml:"global"`
-    Templates           []HTTPTemplate
+    Global           *Global                 `toml:"global"`
+    Templates        []*HTTPTemplate         `toml:"templates"`
 }
 
 type Global struct {
-    URLs                []string           `toml:"urls"`
-	ChecksFile          string             `toml:"checks_file"`
+    URLs             []string                `toml:"urls"`
+    ContentEncoding  string                  `toml:"content_encoding"`
+	ChecksFile       string                  `toml:"checks_file"`
 }
 
 type HTTPTemplate struct {
-    URLs                []string           `toml:"urls"`
-    Key                 string             `toml:"key"`
-    Timeout             string             `toml:"timeout"`
-    Src                 string             `toml:"src"`
-    Temp                string             `toml:"temp"`
-    Dest                string             `toml:"dest"`
-    CheckCmd            string             `toml:"check_cmd"`
-    ReloadCmd           string             `toml:"reload_cmd"`
+    URLs             []string                `toml:"urls"`
+    Path             string                  `toml:"path"`
+    Src              string                  `toml:"src"`
+    Temp             string                  `toml:"temp"`
+    Dest             string                  `toml:"dest"`
+    CheckCmd         string                  `toml:"check_cmd"`
+    ReloadCmd        string                  `toml:"reload_cmd"`
 
-    ContentEncoding     string             `toml:"content_encoding"`
+    ContentEncoding  string                  `toml:"content_encoding"`
 
-    Headers             map[string]string  `toml:"headers"`
+    Headers          map[string]string       `toml:"headers"`
 
-    // HTTP Basic Auth Credentials
-    Username            string             `toml:"username"`
-    Password            string             `toml:"password"`
-
-    // Absolute path to file with Bearer token
-    BearerToken         string             `toml:"bearer_token"`
-
-    funcMap             map[string]interface{}
-    client              *http.Client
+    funcMap          map[string]interface{}
 }
 
 type Checks struct {
-    Checks              []Check            `toml:"checks"`
+    Checks           []Check                 `toml:"checks"`
 }
 
 type Check struct {
-    Key                 string             `toml:"key"`
-    Value               string             `toml:"value"`
-    File                string             `toml:"file"`
-    Http                string             `toml:"http"`
-    Timeout             string             `toml:"timeout"`
+    Key              string                  `toml:"key"`
+    Value            string                  `toml:"value"`
+    File             string                  `toml:"file"`
+    Http             string                  `toml:"http"`
+    Timeout          string                  `toml:"timeout"`
 }
 
-func NewHttpTemplate(h *HTTPTemplate) *HTTPTemplate {
-
-    // Set default timeout
-    if h.Timeout == "" {
-        h.Timeout = "10s"
-    }
-
-    timeout, _ := time.ParseDuration(h.Timeout)
-
-    h.client = &http.Client{
-        Transport: &http.Transport{
-            Proxy:           http.ProxyFromEnvironment,
-        },
-        Timeout: timeout,
-    }
-
+func randURLs(urls []string) []string {
     rand.Seed(time.Now().UnixNano())
-    rand.Shuffle(len(h.URLs), func(i, j int) { h.URLs[i], h.URLs[j] = h.URLs[j], h.URLs[i] })
-
-    return h
-}
-
-func (h *HTTPTemplate) httpRequest() ([]byte, error) {
-
-    for _, url := range h.URLs {
-
-        tmpl, err := template.NewTemplate()
-        if err != nil {
-            log.Printf("[error] %v", err)
-            continue
-        }
-
-        path, err := tmpl.Execute(url, nil)
-        if err != nil {
-            log.Printf("[error] %v", err)
-            continue
-        }
-
-        request, err := http.NewRequest("GET", string(path), nil)
-        if err != nil {
-            log.Printf("[error] %v", err)
-            continue
-        }
-
-        if h.BearerToken != "" {
-            token, err := ioutil.ReadFile(h.BearerToken)
-            if err != nil {
-                log.Printf("[error] %v", err)
-                continue
-            }
-            bearer := "Bearer " + strings.Trim(string(token), "\n")
-            request.Header.Set("Authorization", bearer)
-        }
-
-        if h.ContentEncoding == "gzip" {
-            request.Header.Set("Content-Encoding", "gzip")
-        }
-
-        if h.Username != "" || h.Password != "" {
-            request.SetBasicAuth(h.Username, h.Password)
-        }
-
-        resp, err := h.client.Do(request)
-        if err != nil {
-            log.Printf("[error] %v", err)
-            continue
-        }
-        defer resp.Body.Close()
-
-        body, err := ioutil.ReadAll(resp.Body)
-
-        if resp.StatusCode >= 300 {
-            log.Printf("[error] %s - received status code: %d", url, resp.StatusCode)
-            continue
-        }
-        if err != nil {
-            log.Printf("[error] %s - received error: %v", url, err)
-            continue
-        }
-
-        return body, nil
-    }
-
-    return nil, fmt.Errorf("failed to complete any request")
-}
-
-func (h *HTTPTemplate) Gather() (interface{}, error) {
-    
-    body, err := h.httpRequest()
-    if err != nil {
-        return nil, err
-    }
-
-    var jsn interface{}
-    if err := json.Unmarshal(body, &jsn); err != nil {
-        return nil, fmt.Errorf("reading json from response body: %v", err)
-    }
-
-    return jsn, nil
-
+    rand.Shuffle(len(urls), func(i, j int) { urls[i], urls[j] = urls[j], urls[i] })
+    return urls
 }
 
 func getHash(data []byte) string {
@@ -285,17 +182,14 @@ func loadChecksFile(file string) (Checks, error) {
 
 func main() {
 
-    //limits the number of operating system threads
-    runtime.GOMAXPROCS(runtime.NumCPU())
-
-    //command-line flag parsing
-    cfFile          := flag.String("config", "config/confd.toml", "config file")
+    // Command-line flag parsing
+    cfFile          := flag.String("config.file", "config/confd.toml", "config file")
     interval        := flag.Int("interval", 30, "interval")
     plugin          := flag.String("plugin", "", "plugin")
-    lgFile          := flag.String("logfile", "", "log file")
-    logMaxSize      := flag.Int("log.maxSize", 1, "log max size") 
-    logMaxBackups   := flag.Int("log.maxBackups", 3, "log max backups")
-    logMaxAge       := flag.Int("log.maxAge", 10, "log max age")
+    lgFile          := flag.String("log.file", "", "log file")
+    logMaxSize      := flag.Int("log.max-size", 1, "log max size") 
+    logMaxBackups   := flag.Int("log.max-backups", 3, "log max backups")
+    logMaxAge       := flag.Int("log.max-age", 10, "log max age")
     logCompress     := flag.Bool("log.compress", true, "log compress")
 
     srcFile         := flag.String("src-file", "", "source file")
@@ -384,25 +278,57 @@ func main() {
 
         var wg sync.WaitGroup
 
-        for _, tmpl := range cfg.Templates {
-            wg.Add(1)
-            go func(t HTTPTemplate) {
-                defer wg.Done()
-                
-                if len(t.URLs) == 0 {
-                    for _, u := range cfg.Global.URLs {
-                        t.URLs = append(t.URLs, u+t.Key)
-                    }
+        for _, tl := range cfg.Templates {
+
+            // Set default URLs
+            if len(tl.URLs) == 0 {
+                for _, u := range cfg.Global.URLs {
+                    tl.URLs = append(tl.URLs, u)
                 }
+            }
+            if len(tl.URLs) == 0 {
+                continue
+            }
+
+            // Set default ContentEncoding
+            if tl.ContentEncoding == "" {
+                tl.ContentEncoding = cfg.Global.ContentEncoding
+            }
+
+            // Set path
+            tmpl, err := template.NewTemplate()
+            if err != nil {
+                log.Printf("[error] %v", err)
+                continue
+            }
+            path, err := tmpl.Execute(tl.Path, nil)
+            if err != nil {
+                log.Printf("[error] %v", err)
+                continue
+            }
+
+            wg.Add(1)
+
+            go func(t *HTTPTemplate, path string) {
+                defer wg.Done()
 
                 if t.Temp == "" {
                     t.Temp = t.Dest
                 }
 
-                newTemplate := NewHttpTemplate(&t)
+                config := client.HttpConfig{
+                    URLs: randURLs(t.URLs),
+                    ContentEncoding: t.ContentEncoding,
+                }
 
-                jsn, err := newTemplate.Gather()
+                body, err := httpClient.ReadJson(config, path)
                 if err != nil {
+                    log.Printf("[error] %v", err)
+                    return
+                }
+
+                var jsn interface{}
+                if err := json.Unmarshal(body, &jsn); err != nil {
                     log.Printf("[error] %v", err)
                     if *plugin == "telegraf" {    
                         fmt.Printf("confd,src=%s,dest=%s success=%d\n", t.Src, t.Dest, 1)
@@ -410,7 +336,7 @@ func main() {
                     return
                 }
 
-                succ, err := newTemplate.CreateConf(jsn)
+                succ, err := t.CreateConf(jsn)
                 if err != nil {
                     log.Printf("[error] %v", err)
                     if *plugin == "telegraf" {    
@@ -457,7 +383,7 @@ func main() {
                     fmt.Printf("confd,src=%s,dest=%s success=%d\n", t.Src, t.Dest, 0)
                 }
 
-            }(tmpl)
+            }(tl, string(path))
         }
         
         wg.Wait()

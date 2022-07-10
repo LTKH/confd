@@ -2,7 +2,8 @@
 
 
 [[templates]]
-urls = ["http://{{ replaceAll \".ospd.net\" \"\" hostname }}:8080/test.json","http://{{ hostname }}:8080/test2.json"]
+urls = ["http://127.0.0.1:8080","http://127.0.0.1:8081"]
+path = "/{{ replaceAll \".ospd.net\" \"\" hostname }}/test.json"
 src = "config/inputs.tmpl"
 temp = "/tmp/.localhost.conf"
 dest = "/tmp/localhost.conf"

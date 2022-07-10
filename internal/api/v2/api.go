@@ -7,11 +7,8 @@ import (
     "regexp"
     "context"
     "strings"
-    //"sort"
-    //"io/ioutil"
     "encoding/json"
 	"github.com/coreos/etcd/client"
-    //"github.com/hashicorp/consul/api"
     "github.com/ltkh/confd/internal/config"
 )
 

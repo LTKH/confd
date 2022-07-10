@@ -19,8 +19,8 @@ type Backend struct {
 }
 
 type Global struct {
-	Cert_file        string             `yaml:"cert_file"`
-	Cert_key         string             `yaml:"cert_key"`
+	CertFile         string             `yaml:"cert_file"`
+	CertKey          string             `yaml:"cert_key"`
 }
 
 func LoadConfigFile(filename string) (*Config, error) {
