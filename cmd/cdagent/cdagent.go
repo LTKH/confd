@@ -330,7 +330,7 @@ func main() {
                 var jsn interface{}
                 if err := json.Unmarshal(body, &jsn); err != nil {
                     log.Printf("[error] %v", err)
-                    if *plugin == "telegraf" {    
+                    if *plugin == "telegraf" || *plugin == "windows" {    
                         fmt.Printf("confd,src=%s,dest=%s success=%d\n", t.Src, t.Dest, 1)
                     }
                     return
@@ -339,7 +339,7 @@ func main() {
                 succ, err := t.CreateConf(jsn)
                 if err != nil {
                     log.Printf("[error] %v", err)
-                    if *plugin == "telegraf" {    
+                    if *plugin == "telegraf" || *plugin == "windows" {    
                         fmt.Printf("confd,src=%s,dest=%s success=%d\n", t.Src, t.Dest, succ)
                     }
                     return
@@ -350,7 +350,7 @@ func main() {
                         _, err := runCommand(t.CheckCmd, 10)
                         if err != nil {
                             log.Printf("[error] %v", err)
-                            if *plugin == "telegraf" {
+                            if *plugin == "telegraf" || *plugin == "windows" {
                                 fmt.Printf("confd,src=%s,dest=%s success=%d\n", t.Src, t.Dest, 3)
                             }
                             return
@@ -361,14 +361,14 @@ func main() {
                         err := os.Rename(t.Temp, t.Dest)
                         if err != nil {
                             log.Printf("[error] %v", err)
-                            if *plugin == "telegraf" {
+                            if *plugin == "telegraf" || *plugin == "windows" {
                                 fmt.Printf("confd,src=%s,dest=%s success=%d\n", t.Src, t.Dest, 3)
                             }
                             return
                         }
                     }
 
-                    if *plugin == "telegraf" {
+                    if *plugin == "telegraf" || *plugin == "windows" {
                         fmt.Printf("confd,src=%s,dest=%s success=%d\n", t.Src, t.Dest, 1)
                     }
 
@@ -379,7 +379,7 @@ func main() {
                     return
                 }
 
-                if *plugin == "telegraf" {
+                if *plugin == "telegraf" || *plugin == "windows" {
                     fmt.Printf("confd,src=%s,dest=%s success=%d\n", t.Src, t.Dest, 0)
                 }
 
