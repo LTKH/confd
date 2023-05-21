@@ -68,6 +68,7 @@ func GetEtcdClient(back config.Backend) (*client.Client, error) {
 func (a *ApiEtcd) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
     path := strings.Replace(r.URL.Path, "/api/v2/"+a.Id, "", 1)
+    //log.Printf("[test] %v - %v - %v", r.Method, r.URL.Path, path)
     kapi := client.NewKeysAPI(*a.Client)
 
     if r.Method == http.MethodGet {
@@ -87,7 +88,7 @@ func (a *ApiEtcd) ServeHTTP(w http.ResponseWriter, r *http.Request) {
         resp, err := kapi.Get(context.Background(), path, opts)
         if err != nil {
             log.Printf("[error] %v", err)
-            w.WriteHeader(400)
+            w.WriteHeader(404)
             w.Write([]byte(err.Error()))
             return
         }
@@ -130,7 +131,7 @@ func (a *ApiEtcd) ServeHTTP(w http.ResponseWriter, r *http.Request) {
         resp, err := kapi.Set(context.Background(), path, val, opts)
         if err != nil {
             log.Printf("[error] %v", err)
-            w.WriteHeader(400)
+            w.WriteHeader(502)
             w.Write([]byte(err.Error()))
             return
         } 

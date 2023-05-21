@@ -3,6 +3,7 @@ package client
 import (
     "io"
     "log"
+    "bytes"
     "net/http"
     "time"
     "io/ioutil"
@@ -20,6 +21,12 @@ type HttpConfig struct {
     ContentEncoding  string
 }
 
+type Response struct {
+    Body             []byte
+    StatusCode       int
+    Header           http.Header
+}
+
 func NewHttpClient() *HttpClient {
     client := &HttpClient{ 
         client: &http.Client{
@@ -34,13 +41,15 @@ func NewHttpClient() *HttpClient {
     return client
 }
 
-func (h *HttpClient) ReadJson(cfg HttpConfig, path string) ([]byte, error) {
+func (h *HttpClient) NewRequest(method, path string, data []byte, cfg HttpConfig) (Response, error) {
+
+    var resp Response
 
     for _, url := range cfg.URLs {
 
         var reader io.ReadCloser
 
-        req, err := http.NewRequest("GET", url+path, nil)
+        req, err := http.NewRequest(method, url+path, bytes.NewReader(data))
         if err != nil {
             log.Printf("[error] %s - %v", url, err)
             continue
@@ -58,6 +67,7 @@ func (h *HttpClient) ReadJson(cfg HttpConfig, path string) ([]byte, error) {
             continue
         }
         defer r.Body.Close()
+        resp.StatusCode = r.StatusCode
 
         // Check that the server actual sent compressed data
         switch r.Header.Get("Content-Encoding") {
@@ -73,7 +83,7 @@ func (h *HttpClient) ReadJson(cfg HttpConfig, path string) ([]byte, error) {
         }
 
         if r.StatusCode >= 400 {
-            log.Printf("[error] when reading to [%s] received status code: %d", url+path, r.StatusCode)
+            log.Printf("[error] when request to [%s] received status code: %d", url+path, r.StatusCode)
             continue
         }
 
@@ -82,9 +92,10 @@ func (h *HttpClient) ReadJson(cfg HttpConfig, path string) ([]byte, error) {
             log.Printf("[error] when reading to [%s] received error: %v", url+path, err)
             continue
         }
+        resp.Body = body
 
-        return body, nil
+        return resp, nil
     }
 
-    return nil, fmt.Errorf("failed to complete any request")
+    return resp, fmt.Errorf("failed to complete any request")
 }

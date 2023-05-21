@@ -41,6 +41,7 @@ type Global struct {
 type HTTPTemplate struct {
     URLs             []string                `toml:"urls"`
     Path             string                  `toml:"path"`
+    Create           bool                    `toml:"create"`
     Src              string                  `toml:"src"`
     Temp             string                  `toml:"temp"`
     Dest             string                  `toml:"dest"`
@@ -321,14 +322,17 @@ func main() {
                     ContentEncoding: t.ContentEncoding,
                 }
 
-                body, err := httpClient.ReadJson(config, path)
+                resp, err := httpClient.NewRequest("GET", path, nil, config)
                 if err != nil {
+                    if resp.StatusCode == 404 && t.Create {
+                        httpClient.NewRequest("PUT", path, []byte("dir=true"), config)
+                    }
                     log.Printf("[error] %v", err)
                     return
                 }
 
                 var jsn interface{}
-                if err := json.Unmarshal(body, &jsn); err != nil {
+                if err := json.Unmarshal(resp.Body, &jsn); err != nil {
                     log.Printf("[error] %v", err)
                     if *plugin == "telegraf" || *plugin == "windows" {    
                         fmt.Printf("confd,src=%s,dest=%s success=%d\n", t.Src, t.Dest, 1)
