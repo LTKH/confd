@@ -54,6 +54,9 @@ func (h *HttpClient) NewRequest(method, path string, data []byte, cfg HttpConfig
             log.Printf("[error] %s - %v", url, err)
             continue
         }
+        if method == "PUT"{
+            req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+        }
 
         for name, value := range cfg.Headers {
             req.Header.Set(name, value)
