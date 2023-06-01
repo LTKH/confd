@@ -23,10 +23,6 @@ import (
     "github.com/ltkh/confd/internal/client"
 )
 
-var (
-    httpClient = client.NewHttpClient()
-)
-
 type Config struct {
     Global           *Global                 `toml:"global"`
     Templates        []*HTTPTemplate         `toml:"templates"`
@@ -47,6 +43,7 @@ type HTTPTemplate struct {
     Dest             string                  `toml:"dest"`
     CheckCmd         string                  `toml:"check_cmd"`
     ReloadCmd        string                  `toml:"reload_cmd"`
+    Timeout          string                  `toml:"timeout"`
 
     ContentEncoding  string                  `toml:"content_encoding"`
 
@@ -295,6 +292,17 @@ func main() {
             if tl.ContentEncoding == "" {
                 tl.ContentEncoding = cfg.Global.ContentEncoding
             }
+
+            // Set Timeout
+            if tl.Timeout == "" {
+                tl.Timeout = "5s"
+            }
+            tlTimeout, _ := time.ParseDuration(tl.Timeout)
+            if tlTimeout == 0 {
+                log.Fatal("[error] setting timeout: invalid duration")
+            }
+
+            httpClient := client.NewHttpClient(tlTimeout)
 
             // Set path
             tmpl, err := template.NewTemplate()

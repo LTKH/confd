@@ -27,7 +27,7 @@ type Response struct {
     Header           http.Header
 }
 
-func NewHttpClient() *HttpClient {
+func NewHttpClient(timeout time.Duration) *HttpClient {
     client := &HttpClient{ 
         client: &http.Client{
             Transport: &http.Transport{
@@ -35,7 +35,7 @@ func NewHttpClient() *HttpClient {
                 IdleConnTimeout:     90 * time.Second,
                 DisableCompression:  false,
             },
-            Timeout: 5 * time.Second,
+            Timeout: time.Duration(timeout) * time.Second,
         },
     }
     return client
