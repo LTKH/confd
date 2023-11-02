@@ -38,7 +38,7 @@ type HTTPTemplate struct {
     URLs             []string                `toml:"urls"`
     Path             string                  `toml:"path"`
     Create           bool                    `toml:"create"`
-    Src              string                  `toml:"src"`
+    Src              []string                `toml:"src"`
     Temp             string                  `toml:"temp"`
     Dest             string                  `toml:"dest"`
     CheckCmd         string                  `toml:"check_cmd"`
@@ -78,34 +78,31 @@ func getHash(data []byte) string {
 
 func (h *HTTPTemplate) CreateConf(jsn interface{}) (int, error) {
 
-    tmpl, err := template.NewTemplate()
-    if err != nil {
-        return 3, fmt.Errorf("reading template: %v", err)
-    }
-
-    cont, err := tmpl.ParseFile(h.Src, jsn)
-    if err != nil {
-        return 3, fmt.Errorf("generating config: %v", err)
-    }
-
-    if _, err := os.Stat(h.Dest); err == nil {
-        conf, err := ioutil.ReadFile(h.Dest)
+    if len(h.Src) > 0 { 
+        cont, err := template.New(h.Src[0]).ParseFiles(h.Src, jsn)
         if err != nil {
-            return 4, fmt.Errorf("reading config file %s: %v", h.Dest, err)
+            return 3, fmt.Errorf("generating config: %v", err)
         }
-        if getHash(conf) != getHash(cont) {
+
+        if _, err := os.Stat(h.Dest); err == nil {
+            conf, err := ioutil.ReadFile(h.Dest)
+            if err != nil {
+                return 4, fmt.Errorf("reading config file %s: %v", h.Dest, err)
+            }
+            if getHash(conf) != getHash(cont) {
+                if err := ioutil.WriteFile(h.Temp, cont, 0644); err != nil {
+                    return 4, fmt.Errorf("writing config file %s: %v", h.Dest, err)
+                }
+                return 1, nil
+            }
+        } else if os.IsNotExist(err) {
             if err := ioutil.WriteFile(h.Temp, cont, 0644); err != nil {
                 return 4, fmt.Errorf("writing config file %s: %v", h.Dest, err)
             }
             return 1, nil
+        } else {
+            return 4, fmt.Errorf("reading config file status %s: %v", h.Dest, err)
         }
-    } else if os.IsNotExist(err) {
-        if err := ioutil.WriteFile(h.Temp, cont, 0644); err != nil {
-            return 4, fmt.Errorf("writing config file %s: %v", h.Dest, err)
-        }
-        return 1, nil
-    } else {
-        return 4, fmt.Errorf("reading config file status %s: %v", h.Dest, err)
     }
 
     return 0, nil
@@ -198,11 +195,6 @@ func main() {
 
     // Generate configuration
     if *srcFile != "" {
-        tmpl, err := template.NewTemplate()
-        if err != nil {
-            log.Fatalf("[error] generating template: %v", err)
-        }
-
         data, err := ioutil.ReadFile(*srcFile)
         if err != nil {
             log.Fatalf("[error] reading source file: %v", err)
@@ -213,7 +205,7 @@ func main() {
             log.Fatalf("[error] parsing json file: %v", err)
         }
 
-        cont, err := tmpl.ParseFile(*srcTmpl, jsn)
+        cont, err := template.New(*srcTmpl).ParseFile(*srcTmpl, jsn)
         if err != nil {
             log.Fatalf("[error] generating config file: %v", err)
         }
@@ -304,13 +296,7 @@ func main() {
 
             httpClient := client.NewHttpClient(tlTimeout)
 
-            // Set path
-            tmpl, err := template.NewTemplate()
-            if err != nil {
-                log.Printf("[error] %v", err)
-                continue
-            }
-            path, err := tmpl.Execute(tl.Path, nil)
+            path, err := template.New(tl.Path).Execute(tl.Path, nil)
             if err != nil {
                 log.Printf("[error] %v", err)
                 continue

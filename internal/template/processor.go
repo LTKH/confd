@@ -13,11 +13,11 @@ import (
 // The template retains the relationship between it's contents and is
 // responsible for it's own execution.
 type Template struct {
-    contents  string
+    template  *template.Template
     funcMap   template.FuncMap
 }
 
-func NewTemplate() (*Template, error) {
+func New(name string) *Template {
 
     var t Template
     t.funcMap = template.FuncMap{
@@ -55,12 +55,14 @@ func NewTemplate() (*Template, error) {
         "hostname":        hostname,
     }
 
-    return &t, nil
+    t.template = template.New(filepath.Base(name)).Funcs(t.funcMap)
+
+    return &t
 }
 
 func (t *Template) Execute(source string, jsn interface{}) ([]byte, error) {
 
-    tmpl, err := template.New("new").Funcs(t.funcMap).Parse(source)
+    tmpl, err := t.template.Parse(source)
     if err != nil {
         return nil, errors.Wrap(err, "parse")
     }
@@ -76,10 +78,23 @@ func (t *Template) Execute(source string, jsn interface{}) ([]byte, error) {
 
 func (t *Template) ParseFile(source string, jsn interface{}) ([]byte, error) {
 
-    tmpl := template.New(filepath.Base(source))
-    tmpl.Funcs(t.funcMap)
+    tmpl, err := t.template.ParseFiles(source)
+    if err != nil {
+        return nil, errors.Wrap(err, "parse")
+    }
 
-    tmpl, err := tmpl.ParseFiles(source)
+    // Execute the template into the writer
+    var b bytes.Buffer
+    if err := tmpl.Execute(&b, &jsn); err != nil {
+        return nil, errors.Wrap(err, "execute")
+    }
+
+    return b.Bytes(), nil
+}
+
+func (t *Template) ParseFiles(source []string, jsn interface{}) ([]byte, error) {
+
+    tmpl, err := t.template.ParseFiles(source...)
     if err != nil {
         return nil, errors.Wrap(err, "parse")
     }
