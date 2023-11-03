@@ -6,6 +6,6 @@
 #path = "/api/v2/etcd/{{ replaceAll \".ospd.net\" \"\" hostname }}/apps"
 urls = ["http://localhost:2379/v2/keys"]
 #create = true
-src = ["config/inputs.tmpl","config/inputs2.tmpl"]
+src = "config/inputs*.tmpl"
 temp = "/tmp/.localhost.conf"
 dest = "/tmp/localhost.conf"

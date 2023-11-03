@@ -17,6 +17,7 @@ import (
     "math/rand"
     "crypto/md5"
     "encoding/hex"
+    "path/filepath"
     "github.com/naoina/toml"
     "gopkg.in/natefinch/lumberjack.v2"
     "github.com/ltkh/confd/internal/template"
@@ -38,7 +39,7 @@ type HTTPTemplate struct {
     URLs             []string                `toml:"urls"`
     Path             string                  `toml:"path"`
     Create           bool                    `toml:"create"`
-    Src              []string                `toml:"src"`
+    Src              string                  `toml:"src"`
     Temp             string                  `toml:"temp"`
     Dest             string                  `toml:"dest"`
     CheckCmd         string                  `toml:"check_cmd"`
@@ -78,8 +79,14 @@ func getHash(data []byte) string {
 
 func (h *HTTPTemplate) CreateConf(jsn interface{}) (int, error) {
 
-    if len(h.Src) > 0 { 
-        cont, err := template.New(h.Src[0]).ParseFiles(h.Src, jsn)
+    files, err := filepath.Glob(h.Src)
+    if err != nil {
+        return 3, fmt.Errorf("generating config: %v", err)
+    }
+
+    if len(files) > 0 { 
+
+        cont, err := template.New(files[0]).ParseFiles(files, jsn)
         if err != nil {
             return 3, fmt.Errorf("generating config: %v", err)
         }
