@@ -81,35 +81,36 @@ func (h *HTTPTemplate) CreateConf(jsn interface{}) (int, error) {
 
     files, err := filepath.Glob(h.Src)
     if err != nil {
+        return 3, fmt.Errorf("search for templates: %v", err)
+    }
+
+    if len(files) == 0 { 
+        return 3, fmt.Errorf("template files not found")
+    }
+
+    cont, err := template.New(files[0]).ParseFiles(files, jsn)
+    if err != nil {
         return 3, fmt.Errorf("generating config: %v", err)
     }
 
-    if len(files) > 0 { 
-
-        cont, err := template.New(files[0]).ParseFiles(files, jsn)
+    if _, err := os.Stat(h.Dest); err == nil {
+        conf, err := ioutil.ReadFile(h.Dest)
         if err != nil {
-            return 3, fmt.Errorf("generating config: %v", err)
+            return 4, fmt.Errorf("reading config file %s: %v", h.Dest, err)
         }
-
-        if _, err := os.Stat(h.Dest); err == nil {
-            conf, err := ioutil.ReadFile(h.Dest)
-            if err != nil {
-                return 4, fmt.Errorf("reading config file %s: %v", h.Dest, err)
-            }
-            if getHash(conf) != getHash(cont) {
-                if err := ioutil.WriteFile(h.Temp, cont, 0644); err != nil {
-                    return 4, fmt.Errorf("writing config file %s: %v", h.Dest, err)
-                }
-                return 1, nil
-            }
-        } else if os.IsNotExist(err) {
+        if getHash(conf) != getHash(cont) {
             if err := ioutil.WriteFile(h.Temp, cont, 0644); err != nil {
                 return 4, fmt.Errorf("writing config file %s: %v", h.Dest, err)
             }
             return 1, nil
-        } else {
-            return 4, fmt.Errorf("reading config file status %s: %v", h.Dest, err)
         }
+    } else if os.IsNotExist(err) {
+        if err := ioutil.WriteFile(h.Temp, cont, 0644); err != nil {
+            return 4, fmt.Errorf("writing config file %s: %v", h.Dest, err)
+        }
+        return 1, nil
+    } else {
+        return 4, fmt.Errorf("reading config file status %s: %v", h.Dest, err)
     }
 
     return 0, nil

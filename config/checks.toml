@@ -1,5 +1,0 @@
-[[checks]]
-key = "/test/disabled"
-value = "true"
-file = "/tmp/test"
-http = "http://localhost:8090/test.json"
