@@ -336,7 +336,7 @@ func main() {
                 if err := json.Unmarshal(resp.Body, &jsn); err != nil {
                     log.Printf("[error] %v", err)
                     if *plugin == "telegraf" || *plugin == "windows" {    
-                        fmt.Printf("confd,dest=%s success=%d\n", t.Dest, 1)
+                        fmt.Printf("confd,src=%s,dest=%s success=%d\n", t.Src, t.Dest, 1)
                     }
                     return
                 }
@@ -345,7 +345,7 @@ func main() {
                 if err != nil {
                     log.Printf("[error] %v", err)
                     if *plugin == "telegraf" || *plugin == "windows" {    
-                        fmt.Printf("confd,dest=%s success=%d\n", t.Dest, succ)
+                        fmt.Printf("confd,src=%s,dest=%s success=%d\n", t.Src, t.Dest, succ)
                     }
                     return
                 }
@@ -356,7 +356,7 @@ func main() {
                         if err != nil {
                             log.Printf("[error] %v", err)
                             if *plugin == "telegraf" || *plugin == "windows" {
-                                fmt.Printf("confd,dest=%s success=%d\n", t.Dest, 3)
+                                fmt.Printf("confd,src=%s,dest=%s success=%d\n", t.Src, t.Dest, 3)
                             }
                             return
                         } 
@@ -367,14 +367,14 @@ func main() {
                         if err != nil {
                             log.Printf("[error] %v", err)
                             if *plugin == "telegraf" || *plugin == "windows" {
-                                fmt.Printf("confd,dest=%s success=%d\n", t.Dest, 3)
+                                fmt.Printf("confd,src=%s,dest=%s success=%d\n", t.Src, t.Dest, 3)
                             }
                             return
                         }
                     }
 
                     if *plugin == "telegraf" || *plugin == "windows" {
-                        fmt.Printf("confd,dest=%s success=%d\n", t.Dest, 1)
+                        fmt.Printf("confd,src=%s,dest=%s success=%d\n", t.Src, t.Dest, 1)
                     }
 
                     if t.ReloadCmd != "" {
@@ -385,7 +385,7 @@ func main() {
                 }
 
                 if *plugin == "telegraf" || *plugin == "windows" {
-                    fmt.Printf("confd,dest=%s success=%d\n", t.Dest, 0)
+                    fmt.Printf("confd,src=%s,dest=%s success=%d\n", t.Src, t.Dest, 0)
                 }
 
             }(tl, string(path))
