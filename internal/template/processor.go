@@ -15,6 +15,7 @@ import (
 type Template struct {
     template  *template.Template
     funcMap   template.FuncMap
+    name      string
 }
 
 func New(name string) *Template {
@@ -55,8 +56,8 @@ func New(name string) *Template {
         "hostname":        hostname,
     }
 
-    t.template = template.New(filepath.Base(name)).Funcs(t.funcMap)
-    //t.template = template.New("").Funcs(t.funcMap)
+    t.name = filepath.Base(name)
+    t.template = template.New(t.name).Funcs(t.funcMap)
 
     return &t
 }
@@ -77,24 +78,6 @@ func (t *Template) Execute(source string, jsn interface{}) ([]byte, error) {
     return b.Bytes(), nil
 }
 
-/*
-func (t *Template) ParseFile(source string, jsn interface{}) ([]byte, error) {
-
-    tmpl, err := t.template.ParseFiles(source)
-    if err != nil {
-        return nil, errors.Wrap(err, "parse")
-    }
-
-    // Execute the template into the writer
-    var b bytes.Buffer
-    if err := tmpl.Execute(&b, &jsn); err != nil {
-        return nil, errors.Wrap(err, "execute")
-    }
-
-    return b.Bytes(), nil
-}
-*/
-
 func (t *Template) ParseGlob(source string, jsn interface{}) ([]byte, error) {
 
     tmpl, err := t.template.ParseGlob(source)
@@ -104,7 +87,7 @@ func (t *Template) ParseGlob(source string, jsn interface{}) ([]byte, error) {
 
     // Execute the template into the writer
     var b bytes.Buffer
-    if err := tmpl.Execute(&b, &jsn); err != nil {
+    if err := tmpl.ExecuteTemplate(&b, t.name, &jsn); err != nil {
         return nil, errors.Wrap(err, "execute")
     }
 
