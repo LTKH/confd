@@ -56,6 +56,7 @@ func New(name string) *Template {
     }
 
     t.template = template.New(filepath.Base(name)).Funcs(t.funcMap)
+    //t.template = template.New("").Funcs(t.funcMap)
 
     return &t
 }
@@ -76,6 +77,7 @@ func (t *Template) Execute(source string, jsn interface{}) ([]byte, error) {
     return b.Bytes(), nil
 }
 
+/*
 func (t *Template) ParseFile(source string, jsn interface{}) ([]byte, error) {
 
     tmpl, err := t.template.ParseFiles(source)
@@ -91,10 +93,11 @@ func (t *Template) ParseFile(source string, jsn interface{}) ([]byte, error) {
 
     return b.Bytes(), nil
 }
+*/
 
-func (t *Template) ParseFiles(source []string, jsn interface{}) ([]byte, error) {
+func (t *Template) ParseGlob(source string, jsn interface{}) ([]byte, error) {
 
-    tmpl, err := t.template.ParseFiles(source...)
+    tmpl, err := t.template.ParseGlob(source)
     if err != nil {
         return nil, errors.Wrap(err, "parse")
     }

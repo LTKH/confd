@@ -17,7 +17,6 @@ import (
     "math/rand"
     "crypto/md5"
     "encoding/hex"
-    "path/filepath"
     "github.com/naoina/toml"
     "gopkg.in/natefinch/lumberjack.v2"
     "github.com/ltkh/confd/internal/template"
@@ -40,16 +39,14 @@ type HTTPTemplate struct {
     Path             string                  `toml:"path"`
     Create           bool                    `toml:"create"`
     Src              string                  `toml:"src"`
+    SrcMatch         string                  `toml:"src_match"`
     Temp             string                  `toml:"temp"`
     Dest             string                  `toml:"dest"`
     CheckCmd         string                  `toml:"check_cmd"`
     ReloadCmd        string                  `toml:"reload_cmd"`
     Timeout          string                  `toml:"timeout"`
-
     ContentEncoding  string                  `toml:"content_encoding"`
-
     Headers          map[string]string       `toml:"headers"`
-
     funcMap          map[string]interface{}
 }
 
@@ -79,16 +76,11 @@ func getHash(data []byte) string {
 
 func (h *HTTPTemplate) CreateConf(jsn interface{}) (int, error) {
 
-    files, err := filepath.Glob(h.Src)
-    if err != nil {
-        return 3, fmt.Errorf("search for templates: %v", err)
+    if h.SrcMatch == "" {
+        h.SrcMatch = h.Src
     }
 
-    if len(files) == 0 { 
-        return 3, fmt.Errorf("template files not found")
-    }
-
-    cont, err := template.New(files[0]).ParseFiles(files, jsn)
+    cont, err := template.New(h.Src).ParseGlob(h.SrcMatch, jsn)
     if err != nil {
         return 3, fmt.Errorf("generating config: %v", err)
     }
@@ -197,6 +189,7 @@ func main() {
 
     srcFile         := flag.String("src-file", "", "source file")
     srcTmpl         := flag.String("src-tmpl", "", "source template")
+    srcMatch        := flag.String("src-match", "", "source match")
     destFile        := flag.String("dest-file", "", "destination file")
 
     flag.Parse()
@@ -213,7 +206,11 @@ func main() {
             log.Fatalf("[error] parsing json file: %v", err)
         }
 
-        cont, err := template.New(*srcTmpl).ParseFile(*srcTmpl, jsn)
+        if *srcMatch == "" {
+            srcMatch = srcTmpl
+        }
+
+        cont, err := template.New(*srcTmpl).ParseGlob(*srcMatch, jsn)
         if err != nil {
             log.Fatalf("[error] generating config file: %v", err)
         }

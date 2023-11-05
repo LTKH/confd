@@ -7,5 +7,6 @@
 urls = ["http://localhost:2379/v2/keys"]
 #create = true
 src = "config/inputs.tmpl"
+src_match = "config/inputs*.tmpl"
 temp = "/tmp/.localhost.conf"
 dest = "config/localhost.conf"

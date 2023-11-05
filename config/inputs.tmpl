@@ -17,3 +17,5 @@ urls = "{{ join "," .urls }}"
 [[inputs.http_response]]
   urls = ["{{ $.url }}"]
 {{ end }}
+
+{{ template "test" }}
