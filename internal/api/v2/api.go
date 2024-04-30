@@ -14,7 +14,7 @@ import (
 
 type ApiEtcd struct {
     Id             string
-    Client         *client.Client
+    Client         client.KeysAPI
     KeyMasks       []string
 }
 
@@ -48,7 +48,7 @@ func getEtcdNodes(nodes client.Nodes) (map[string]interface{}) {
     return jsn
 }
 
-func GetEtcdClient(back config.Backend) (*client.Client, error) {
+func GetEtcdClient(back config.Backend) (*client.KeysAPI, error) {
 
     conf := client.Config{
         Endpoints:               back.Nodes,
@@ -58,12 +58,14 @@ func GetEtcdClient(back config.Backend) (*client.Client, error) {
         HeaderTimeoutPerRequest: 5 * time.Second,
     }
 
-    client, err := client.New(conf)
+    etcd, err := client.New(conf)
     if err != nil {
         return nil, err
     }
 
-    return &client, nil
+    kapi := client.NewKeysAPI(etcd)
+
+    return &kapi, nil
 }
 
 func (a *ApiEtcd) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -85,8 +87,6 @@ func (a *ApiEtcd) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
     work:
 
-        kapi := client.NewKeysAPI(*a.Client)
-
         if r.Method == http.MethodGet {
             
             opts := &client.GetOptions{}
@@ -101,7 +101,7 @@ func (a *ApiEtcd) ServeHTTP(w http.ResponseWriter, r *http.Request) {
                 opts.Sort = true
             }
 
-            resp, err := kapi.Get(context.Background(), path, opts)
+            resp, err := a.Client.Get(context.Background(), path, opts)
             if err != nil {
                 log.Printf("[error] %v", err)
                 w.WriteHeader(404)
@@ -137,14 +137,11 @@ func (a *ApiEtcd) ServeHTTP(w http.ResponseWriter, r *http.Request) {
                 return
             }
 
-            val := r.PostForm.Get("value")
-            dir := r.PostForm.Get("dir")
-
-            if dir == "true" {
+            if r.PostForm.Get("dir") == "true" {
                 opts.Dir = true
             }
 
-            resp, err := kapi.Set(context.Background(), path, val, opts)
+            resp, err := a.Client.Set(context.Background(), path, r.PostForm.Get("value"), opts)
             if err != nil {
                 log.Printf("[error] %v", err)
                 w.WriteHeader(502)
