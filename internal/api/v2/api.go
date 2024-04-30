@@ -151,7 +151,7 @@ func (a *ApiEtcd) ServeHTTP(w http.ResponseWriter, r *http.Request) {
         var event Event
 
         body, code, err := a.Request("GET", path, nil)
-        if err != nil {
+        if err != nil || code >= 400 {
             log.Printf("[error] %v: GET (%v) [%v]", code, r.URL.String(), ReadUserIP(r))
             w.WriteHeader(code)
             w.Write(body)
@@ -161,7 +161,6 @@ func (a *ApiEtcd) ServeHTTP(w http.ResponseWriter, r *http.Request) {
         if err := json.Unmarshal(body, &event); err != nil {
             log.Printf("[error] 500: GET (%v) [%v]", r.URL.String(), ReadUserIP(r))
             w.WriteHeader(500)
-            w.Write(body)
             return
         }
 
