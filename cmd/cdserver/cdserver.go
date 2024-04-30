@@ -68,7 +68,7 @@ func main() {
             if err != nil {
                 log.Fatalf("[error] %v", err)
             }
-            http.Handle("/api/v2/"+back.Id+"/", &v2.ApiEtcd{Id: back.Id, Client: etcdClient})
+            http.Handle("/api/v2/"+back.Id+"/", &v2.ApiEtcd{Id: back.Id, Client: etcdClient, KeyMasks: back.KeyMasks})
         }
 
         if back.Backend == "consul" {

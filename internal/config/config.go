@@ -16,6 +16,7 @@ type Backend struct {
     Nodes            []string           `yaml:"nodes"`
     Username         string             `yaml:"username"`
 	Password         string             `yaml:"password"`
+	KeyMasks         []string           `yaml:"keys"`
 }
 
 type Global struct {

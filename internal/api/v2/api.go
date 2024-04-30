@@ -15,6 +15,7 @@ import (
 type ApiEtcd struct {
     Id             string
     Client         *client.Client
+    KeyMasks       []string
 }
 
 func getEtcdNodes(nodes client.Nodes) (map[string]interface{}) {
@@ -68,87 +69,102 @@ func GetEtcdClient(back config.Backend) (*client.Client, error) {
 func (a *ApiEtcd) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
     path := strings.Replace(r.URL.Path, "/api/v2/"+a.Id, "", 1)
-    //log.Printf("[test] %v - %v - %v", r.Method, r.URL.Path, path)
-    kapi := client.NewKeysAPI(*a.Client)
 
-    if r.Method == http.MethodGet {
+    if len(a.KeyMasks) > 0 {
+        for _, mask := range a.KeyMasks {
+            matched, _ := regexp.MatchString(mask, path)
+            if matched {
+                goto work
+            }
+        }
+        log.Printf("[error] 403: Access is denied (%v)", path)
+        w.WriteHeader(403)
+        w.Write([]byte("Access is denied"))
+        return
+    }
+
+    work:
+
+        kapi := client.NewKeysAPI(*a.Client)
+
+        if r.Method == http.MethodGet {
+            
+            opts := &client.GetOptions{}
+
+            rec, ok := r.URL.Query()["recursive"]
+            if ok && rec[0] == "true" {
+                opts.Recursive = true
+            }
+
+            srt, ok := r.URL.Query()["sorted"]
+            if ok && srt[0] == "true" {
+                opts.Sort = true
+            }
+
+            resp, err := kapi.Get(context.Background(), path, opts)
+            if err != nil {
+                log.Printf("[error] %v", err)
+                w.WriteHeader(404)
+                w.Write([]byte(err.Error()))
+                return
+            }
+
+            jsn := getEtcdNodes(resp.Node.Nodes)
+
+            data, err := json.Marshal(jsn)
+            if err != nil {
+                log.Printf("[error] %v", err)
+                w.WriteHeader(500)
+                return
+            }
+
+            w.Header().Set("Content-Type", "application/json")
+            w.Write(data)
+
+            return
+
+        }
+
+        if r.Method == http.MethodPut {
+
+            opts := &client.SetOptions{}
+
+            err := r.ParseForm()
+            if err != nil {
+                log.Printf("[error] %v - %s", err, r.URL.Path)
+                w.WriteHeader(400)
+                w.Write([]byte(err.Error()))
+                return
+            }
+
+            val := r.PostForm.Get("value")
+            dir := r.PostForm.Get("dir")
+
+            if dir == "true" {
+                opts.Dir = true
+            }
+
+            resp, err := kapi.Set(context.Background(), path, val, opts)
+            if err != nil {
+                log.Printf("[error] %v", err)
+                w.WriteHeader(502)
+                w.Write([]byte(err.Error()))
+                return
+            } 
+
+            data, err := json.Marshal(resp)
+            if err != nil {
+                log.Printf("[error] %v", err)
+                w.WriteHeader(500)
+                return
+            }
+
+            w.Header().Set("Content-Type", "application/json")
+            w.Write(data)
+
+            return
+
+        }
         
-        opts := &client.GetOptions{}
-
-        rec, ok := r.URL.Query()["recursive"]
-        if ok && rec[0] == "true" {
-            opts.Recursive = true
-        }
-
-        srt, ok := r.URL.Query()["sorted"]
-        if ok && srt[0] == "true" {
-            opts.Sort = true
-        }
-
-        resp, err := kapi.Get(context.Background(), path, opts)
-        if err != nil {
-            log.Printf("[error] %v", err)
-            w.WriteHeader(404)
-            w.Write([]byte(err.Error()))
-            return
-        }
-
-        jsn := getEtcdNodes(resp.Node.Nodes)
-
-        data, err := json.Marshal(jsn)
-		if err != nil {
-			log.Printf("[error] %v", err)
-            w.WriteHeader(500)
-			return
-		}
-
-        w.Header().Set("Content-Type", "application/json")
-		w.Write(data)
-
-        return
-
-    }
-
-    if r.Method == http.MethodPut {
-
-        opts := &client.SetOptions{}
-
-        err := r.ParseForm()
-        if err != nil {
-            log.Printf("[error] %v - %s", err, r.URL.Path)
-            w.WriteHeader(400)
-            w.Write([]byte(err.Error()))
-            return
-        }
-
-        val := r.PostForm.Get("value")
-        dir := r.PostForm.Get("dir")
-
-        if dir == "true" {
-            opts.Dir = true
-        }
-
-        resp, err := kapi.Set(context.Background(), path, val, opts)
-        if err != nil {
-            log.Printf("[error] %v", err)
-            w.WriteHeader(502)
-            w.Write([]byte(err.Error()))
-            return
-        } 
-
-        data, err := json.Marshal(resp)
-		if err != nil {
-			log.Printf("[error] %v", err)
-            w.WriteHeader(500)
-			return
-		}
-
-        w.Header().Set("Content-Type", "application/json")
-		w.Write(data)
-
-        return
-
-    }
-    
     w.WriteHeader(405)
 }
