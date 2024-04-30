@@ -5,20 +5,42 @@ import (
     "net/http"
     "time"
     "regexp"
-    "context"
+    "io"
+    "io/ioutil"
     "strings"
+    "bytes"
     "encoding/json"
-	"github.com/coreos/etcd/client"
     "github.com/ltkh/confd/internal/config"
 )
 
+var httpClient = &http.Client{Timeout: 60 * time.Second}
+
 type ApiEtcd struct {
     Id             string
-    Client         client.KeysAPI
+    Client         *http.Client
     KeyMasks       []string
+    Username       string
+    Password       string
+    Nodes          []string
 }
 
-func getEtcdNodes(nodes client.Nodes) (map[string]interface{}) {
+type Event struct {
+    Action         string      `json:"action,omitempty"`
+    Node           *Node       `json:"node,omitempty"`
+}
+
+type Node struct {
+    Key            string      `json:"key,omitempty"`
+    Value          *string     `json:"value,omitempty"`
+    Dir            bool        `json:"dir"`
+    ExpireTime     time.Time   `json:"-"`
+    TTL            int64       `json:"ttl,omitempty"`
+    Nodes          []*Node     `json:"nodes,omitempty"`
+    ModifiedIndex  uint64      `json:"-"`
+    CreatedIndex   uint64      `json:"-"`
+}
+
+func getEtcdNodes(nodes []*Node) (map[string]interface{}) {
     jsn := map[string]interface{}{}
 
     if nodes != nil {
@@ -29,7 +51,7 @@ func getEtcdNodes(nodes client.Nodes) (map[string]interface{}) {
             key := re.ReplaceAllString(node.Key, "$1")
             if node.Dir != true {
                 var v interface{}
-                err := json.Unmarshal([]byte(node.Value), &v)
+                err := json.Unmarshal([]byte(*node.Value), &v)
                 if err == nil {
                     jsn[key] = v
                 } else {
@@ -48,120 +70,139 @@ func getEtcdNodes(nodes client.Nodes) (map[string]interface{}) {
     return jsn
 }
 
-func GetEtcdClient(back config.Backend) (*client.KeysAPI, error) {
+func GetEtcdClient(back config.Backend) (*ApiEtcd, error) {
 
-    conf := client.Config{
-        Endpoints:               back.Nodes,
-        Username:                back.Username,
-        Password:                back.Password,
-        Transport:               client.DefaultTransport,
-        HeaderTimeoutPerRequest: 5 * time.Second,
+    conf := &ApiEtcd{
+        Nodes:       back.Nodes,
+        Client:      &http.Client{Timeout: 60 * time.Second},
+        Username:    back.Username,
+        Password:    back.Password,
     }
 
-    etcd, err := client.New(conf)
-    if err != nil {
-        return nil, err
+    return conf, nil
+}
+
+func (a *ApiEtcd) Request(method, URN string, data io.Reader) (body []byte, code int, err error) {
+    for _, node := range a.Nodes {
+
+        req, err := http.NewRequest(method, node+URN, data)
+        if err != nil {
+            continue
+        }
+        if a.Username != "" && a.Password != "" {
+            req.SetBasicAuth(a.Username, a.Password)
+        }
+        if method == "PUT" {
+            req.Header.Set("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8")
+        }
+        
+        res, err := httpClient.Do(req)
+        if err != nil {
+            code = 500
+            continue
+        }
+        defer res.Body.Close()
+        
+        body, err := ioutil.ReadAll(res.Body)
+        if err != nil {
+            code = res.StatusCode
+            continue
+        }
+        
+        return body, res.StatusCode, nil
+
     }
 
-    kapi := client.NewKeysAPI(etcd)
+    return body, code, err
+}
 
-    return &kapi, nil
+func ReadUserIP(r *http.Request) string {
+    IPAddress := r.Header.Get("X-Real-Ip")
+    if IPAddress == "" {
+        IPAddress = r.Header.Get("X-Forwarded-For")
+    }
+    if IPAddress == "" {
+        IPAddress = r.RemoteAddr
+    }
+    return IPAddress
 }
 
 func (a *ApiEtcd) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+    w.Header().Set("Content-Type", "application/json")
 
-    path := strings.Replace(r.URL.Path, "/api/v2/"+a.Id, "", 1)
+    path := strings.Replace(r.URL.String(), "/api/v2/"+a.Id, "/v2/keys", 1)
 
     if len(a.KeyMasks) > 0 {
+        matched := false
         for _, mask := range a.KeyMasks {
-            matched, _ := regexp.MatchString(mask, path)
-            if matched {
-                goto work
-            }
+            matched, _ = regexp.MatchString(mask, path)
+            if matched { break }
         }
-        log.Printf("[error] 403: Access is denied (%v)", path)
-        w.WriteHeader(403)
-        w.Write([]byte("Access is denied"))
+        if !matched {
+            log.Printf("[error] 403: Access is denied (%v)", path)
+            w.WriteHeader(403)
+            w.Write([]byte("Access is denied"))
+            return
+        }
+    }
+
+    if r.Method == http.MethodGet {
+
+        var event Event
+
+        body, code, err := a.Request("GET", path, nil)
+        if err != nil {
+            log.Printf("[error] %v: GET (%v) [%v]", code, r.URL.String(), ReadUserIP(r))
+            w.WriteHeader(code)
+            w.Write(body)
+            return
+        } 
+
+        if err := json.Unmarshal(body, &event); err != nil {
+            log.Printf("[error] 500: GET (%v) [%v]", r.URL.String(), ReadUserIP(r))
+            w.WriteHeader(500)
+            w.Write(body)
+            return
+        }
+
+        data, err := json.Marshal(getEtcdNodes(event.Node.Nodes))
+        if err != nil {
+            log.Printf("[error] 500: GET (%v) [%v]", r.URL.String(), ReadUserIP(r))
+            w.WriteHeader(500)
+            return
+        }
+
+        log.Printf("[info] %v: GET (%v) [%v]", code, r.URL.String(), ReadUserIP(r))
+        w.WriteHeader(code)
+        w.Write(data)
         return
     }
 
-    work:
+    if r.Method == http.MethodPut {
 
-        if r.Method == http.MethodGet {
-            
-            opts := &client.GetOptions{}
-
-            rec, ok := r.URL.Query()["recursive"]
-            if ok && rec[0] == "true" {
-                opts.Recursive = true
-            }
-
-            srt, ok := r.URL.Query()["sorted"]
-            if ok && srt[0] == "true" {
-                opts.Sort = true
-            }
-
-            resp, err := a.Client.Get(context.Background(), path, opts)
-            if err != nil {
-                log.Printf("[error] %v", err)
-                w.WriteHeader(404)
-                w.Write([]byte(err.Error()))
-                return
-            }
-
-            jsn := getEtcdNodes(resp.Node.Nodes)
-
-            data, err := json.Marshal(jsn)
-            if err != nil {
-                log.Printf("[error] %v", err)
-                w.WriteHeader(500)
-                return
-            }
-
-            w.Header().Set("Content-Type", "application/json")
-            w.Write(data)
-
+        buffer, err := ioutil.ReadAll(r.Body)
+        if err != nil {
+            log.Printf("[error] 400: PUT (%v) [%v]", r.URL.String(), ReadUserIP(r))
+            w.WriteHeader(400)
+            w.Write([]byte(err.Error()))
             return
+        }
+        defer r.Body.Close()
 
+        body, code, err := a.Request("PUT", path, bytes.NewReader(buffer))
+        if err != nil {
+            log.Printf("[error] %v: PUT (%v) [%v]", code, r.URL.String(), ReadUserIP(r))
+            w.WriteHeader(code)
+            w.Write(body)
+            return
         }
 
-        if r.Method == http.MethodPut {
+        log.Printf("[info] %v: PUT (%v) [%v]", code, r.URL.String(), ReadUserIP(r))
+        w.WriteHeader(code)
+        w.Write(body)
+        return
 
-            opts := &client.SetOptions{}
-
-            err := r.ParseForm()
-            if err != nil {
-                log.Printf("[error] %v - %s", err, r.URL.Path)
-                w.WriteHeader(400)
-                w.Write([]byte(err.Error()))
-                return
-            }
-
-            if r.PostForm.Get("dir") == "true" {
-                opts.Dir = true
-            }
-
-            resp, err := a.Client.Set(context.Background(), path, r.PostForm.Get("value"), opts)
-            if err != nil {
-                log.Printf("[error] %v", err)
-                w.WriteHeader(502)
-                w.Write([]byte(err.Error()))
-                return
-            } 
-
-            data, err := json.Marshal(resp)
-            if err != nil {
-                log.Printf("[error] %v", err)
-                w.WriteHeader(500)
-                return
-            }
-
-            w.Header().Set("Content-Type", "application/json")
-            w.Write(data)
-
-            return
-
-        }
+    }
         
     w.WriteHeader(405)
 }
