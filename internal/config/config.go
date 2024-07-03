@@ -14,7 +14,14 @@ type Backend struct {
 	Backend          string             `yaml:"backend"`
 	Id               string             `yaml:"id"`
     Nodes            []string           `yaml:"nodes"`
-    Username         string             `yaml:"username"`
+	Username         string             `yaml:"username"`
+	Password         string             `yaml:"password"`
+	Write            Attributes         `yaml:"write"`
+	Read             Attributes         `yaml:"read"`
+}
+
+type Attributes struct {
+	Username         string             `yaml:"username"`
 	Password         string             `yaml:"password"`
 	KeyMasks         []string           `yaml:"keys"`
 }
