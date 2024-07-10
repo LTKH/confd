@@ -5,6 +5,7 @@ import (
     _ "net/http/pprof"
     "flag"
     "log"
+    "fmt"
     "os"
     "os/signal"
     "syscall"
@@ -35,7 +36,7 @@ func main() {
 
     // Show version
     if *version {
-        log.Printf("%v", Version)
+        fmt.Printf("%v\n", Version)
         return
     }
 
