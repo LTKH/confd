@@ -16,6 +16,10 @@ import (
     "github.com/ltkh/confd/internal/config"
 )
 
+var (
+    Version = "unknown"
+)
+
 func main() {
 
     // Command-line flag parsing
@@ -26,7 +30,14 @@ func main() {
     logMaxBackups  := flag.Int("log.max-backups", 3, "log max backups")
     logMaxAge      := flag.Int("log.max-age", 10, "log max age")
     logCompress    := flag.Bool("log.compress", true, "log compress")
+    version        := flag.Bool("version", false, "show cdserver version")
     flag.Parse()
+
+    // Show version
+    if *version {
+        log.Printf("%v", Version)
+        return
+    }
 
 	// Program completion signal processing
     c := make(chan os.Signal, 2)

@@ -23,6 +23,10 @@ import (
     "github.com/ltkh/confd/internal/client"
 )
 
+var (
+    Version = "unknown"
+)
+
 type Config struct {
     Global           *Global                 `toml:"global"`
     Templates        []*HTTPTemplate         `toml:"templates"`
@@ -186,6 +190,7 @@ func main() {
     logMaxBackups   := flag.Int("log.max-backups", 3, "log max backups")
     logMaxAge       := flag.Int("log.max-age", 10, "log max age")
     logCompress     := flag.Bool("log.compress", true, "log compress")
+    version         := flag.Bool("version", false, "show cdagent version")
 
     srcFile         := flag.String("src-file", "", "source file")
     srcTmpl         := flag.String("src-tmpl", "", "source template")
@@ -193,6 +198,12 @@ func main() {
     destFile        := flag.String("dest-file", "", "destination file")
 
     flag.Parse()
+
+    // Show version
+    if *version {
+        log.Printf("%v", Version)
+        return
+    }
 
     // Generate configuration
     if *srcFile != "" {
