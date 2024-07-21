@@ -4,7 +4,7 @@ COPY . /src/
 WORKDIR /src/
 RUN go build -o /bin/cdserver cmd/cdserver/cdserver.go
 
-FROM centos
+FROM alpine:latest
 
 EXPOSE 8084
 
@@ -12,7 +12,7 @@ ENV USER_ID=1000
 ENV USER_NAME=cdserver
 
 RUN mkdir /data && chmod 755 /data && \
-    useradd -M --uid $USER_ID --home /data $USER_NAME && \
+    adduser -D -u $USER_ID -h /data $USER_NAME && \
     chown -R $USER_NAME /data
 
 COPY --from=builder /bin/cdserver /bin/cdserver
