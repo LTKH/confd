@@ -1,10 +1,10 @@
 [global]
-
+templates_dir = "config"
 
 [[templates]]
 #urls = ["http://127.0.0.1:8083"]
 #path = "/api/v2/etcd/{{ replaceAll \".ospd.net\" \"\" hostname }}/apps"
-urls = ["http://localhost:2379/v2/keys"]
+#urls = ["http://localhost:2379/v2/keys"]
 #create = true
 src = "config/inputs.tmpl"
 src_match = "config/inputs*.tmpl"

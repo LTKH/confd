@@ -1,0 +1,8 @@
+{{ range $key, $val := .measurements -}}
+    {{ $val.configuration.type }}
+    {{ range $k, $v := $val.configuration.urls -}}
+        {{ if not (connectHttp "GET" $v 200) }}
+            {{ warn "test" }}
+        {{ end }}
+    {{ end }}
+{{ end }}

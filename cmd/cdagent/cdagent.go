@@ -9,6 +9,7 @@ import (
     "flag"
     "sync"
     "fmt"
+    "net/http"
     "runtime"
     "os/exec"
     "context"
@@ -17,6 +18,7 @@ import (
     "math/rand"
     "crypto/md5"
     "encoding/hex"
+    "github.com/gorilla/mux"
     "github.com/naoina/toml"
     "gopkg.in/natefinch/lumberjack.v2"
     "github.com/ltkh/confd/internal/template"
@@ -36,6 +38,7 @@ type Global struct {
     URLs             []string                `toml:"urls"`
     ContentEncoding  string                  `toml:"content_encoding"`
 	ChecksFile       string                  `toml:"checks_file"`
+    TemplatesDir     string                  `toml:"templates_dir"`
 }
 
 type HTTPTemplate struct {
@@ -64,6 +67,21 @@ type Check struct {
     File             string                  `toml:"file"`
     Http             string                  `toml:"http"`
     Timeout          string                  `toml:"timeout"`
+}
+
+type Resp struct {
+    Status           string                  `json:"status"`
+    Error            string                  `json:"error,omitempty"`
+    Warnings         []string                `json:"warnings,omitempty"`
+    Data             interface{}             `json:"data,omitempty"`
+}
+
+func encodeResp(resp *Resp) []byte {
+    jsn, err := json.Marshal(resp)
+    if err != nil {
+        return encodeResp(&Resp{Status:"error", Error:err.Error(), Data:make([]int, 0)})
+    }
+    return jsn
 }
 
 func randURLs(urls []string) []string {
@@ -179,6 +197,61 @@ func loadChecksFile(file string) (Checks, error) {
     return chs, nil
 }
 
+func (c *Config) CheckTemplate(w http.ResponseWriter, r *http.Request) {
+    w.Header().Set("Content-Type", "application/json")
+
+    body, err := ioutil.ReadAll(r.Body)
+    if err != nil {
+        log.Printf("[error] %v - %s", err, r.URL.Path)
+        w.WriteHeader(400)
+        w.Write([]byte(err.Error()))
+        return
+    }
+    defer r.Body.Close()
+
+    var jsn interface{}
+    if err := json.Unmarshal(body, &jsn); err != nil {
+        log.Printf("[error] parsing json file: %v", err)
+        w.WriteHeader(400)
+        w.Write([]byte(err.Error()))
+        return
+    }
+
+    if c.Global.TemplatesDir == "" {
+        c.Global.TemplatesDir = "."
+    }
+
+    params := mux.Vars(r)
+    srcTmpl := fmt.Sprintf("%s/%s", c.Global.TemplatesDir, params["name"])
+
+    tmpl := template.New(srcTmpl)
+
+    _, err = tmpl.ParseGlob(srcTmpl, jsn)
+    if err != nil {
+        log.Printf("[error] generating config file: %v", err)
+        w.WriteHeader(400)
+        w.Write([]byte(err.Error()))
+        return
+    }
+
+    close(tmpl.Warnings)
+
+    if len(tmpl.Warnings) > 0 {
+        resp := &Resp{Status:"warning"}
+    
+        for warn := range tmpl.Warnings {
+            resp.Warnings = append(resp.Warnings, warn)
+        }
+
+        w.WriteHeader(400)
+        w.Write(encodeResp(resp))
+        return
+    }
+
+    w.WriteHeader(200)
+    w.Write(encodeResp(&Resp{Status:"success"}))
+}
+
 func main() {
 
     // Command-line flag parsing
@@ -196,6 +269,7 @@ func main() {
     srcTmpl         := flag.String("src-tmpl", "", "source template")
     srcMatch        := flag.String("src-match", "", "source match")
     destFile        := flag.String("dest-file", "", "destination file")
+    lsAddress       := flag.String("listen-address", "", "listen address")
 
     flag.Parse()
 
@@ -244,8 +318,29 @@ func main() {
         })
     }
 
+    // loading configuration file
+    cfg, err := loadConfigFile(*cfFile)
+    if err != nil {
+        log.Fatalf("[error] reading config file: %v", err)
+    }
+
+    // Port settings
+    if *lsAddress != "" {
+        rtr := mux.NewRouter()
+        rtr.HandleFunc("/templates/{name:[^/]+}", cfg.CheckTemplate)
+        http.Handle("/", rtr)
+
+        go func(){
+            log.Printf("[info] listen address: %v", *lsAddress)
+            err := http.ListenAndServe(*lsAddress, nil)
+            if err != nil {
+                log.Fatalf("[error] %v", err)
+            }
+        }()
+    }
+
     log.Print("[info] cdagent started -_-")
-    
+
     run := true
 
     // Program signal processing
@@ -268,12 +363,6 @@ func main() {
             }
         }
     }()
-
-    // loading configuration file
-    cfg, err := loadConfigFile(*cfFile)
-    if err != nil {
-        log.Fatalf("[error] reading config file: %v", err)
-    }
 
     // Daemon mode
     for (run) {
