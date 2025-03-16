@@ -1,7 +1,7 @@
 package template
 
 import (
-    "log"
+    //"log"
     "strings"
     "time"
     "text/template"
@@ -17,7 +17,6 @@ type Template struct {
     template  *template.Template
     funcMap   template.FuncMap
     name      string
-    Warnings  chan string
 }
 
 func New(name string) *Template {
@@ -28,6 +27,8 @@ func New(name string) *Template {
         "isSlice":         isSlice,
         "toInt":           toInt,
         "toFloat":         toFloat,
+        "toString":        toString,
+        "toJson":          toJson,
         "add":             addFunc,
         "strQuote":        strQuote,
         "base":            filepath.Base,
@@ -49,6 +50,7 @@ func New(name string) *Template {
         "mod":             func(a, b int) int { return a % b },
         "mul":             func(a, b int) int { return a * b },
         "connectHttp":     connectHttpFunc,
+        "requestHttp":     requestHttpFunc,
         "regexReplaceAll": regexReplaceAll,
         "regexMatch":      regexMatch,
         "replaceAll":      replaceAll,
@@ -56,10 +58,10 @@ func New(name string) *Template {
         "lookupIPV6":      lookupIPV6,
         "fileExist":       fileExist,
         "hostname":        hostname,
-        "warn":            t.Warning,
+        "fromJson":        fromJson,
+        "fromJsonArray":   fromJsonArray,
     }
 
-    t.Warnings = make(chan string, 1000)
     t.name = filepath.Base(name)
     t.template = template.New(t.name).Funcs(t.funcMap)
 
@@ -96,13 +98,4 @@ func (t *Template) ParseGlob(source string, jsn interface{}) ([]byte, error) {
     }
 
     return b.Bytes(), nil
-}
-
-func (t *Template) Warning(w string) (error) {
-    select {
-    case t.Warnings <- w:
-        log.Printf("[warn] %s: %s", t.name, w)
-    }
-
-    return nil
 }

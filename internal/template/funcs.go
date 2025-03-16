@@ -11,6 +11,10 @@ import (
     "net"
     "sort"
     "os"
+    "io/ioutil"
+    "bytes"
+    //"errors"
+    "encoding/json"
 )
 
 func isArray(v interface{}) bool {
@@ -55,6 +59,19 @@ func toFloat(i interface{}) (float64, error) {
     }
 
     return 0, fmt.Errorf("unknown type - %T", i)
+}
+
+func toString(data interface{}) (string, error) {
+    return fmt.Sprintf("%v", data), nil
+}
+
+func toJson(data interface{}) (string, error) {
+    result, err := json.MarshalIndent(&data, "", "\t")
+    if err != nil {
+        return "", err
+    }
+
+    return string(result), nil
 }
 
 func addFunc(b, a interface{}) (float64, error) {
@@ -131,6 +148,37 @@ func connectHttpFunc(method string, url string, code int) bool {
     }
 
     return false
+}
+
+func requestHttpFunc(method string, url string, data string, headers map[string]interface{}) (string, error) {
+    client := &http.Client{
+        Transport: &http.Transport{
+            Proxy: http.ProxyFromEnvironment,
+        },
+        Timeout: time.Duration(5) * time.Second,
+    }
+    
+    request, err := http.NewRequest(method, url, bytes.NewBufferString(data))
+    if err != nil {
+        return "", err
+    }
+
+    for key, val := range headers {
+        request.Header.Set(key, fmt.Sprintf("%v", val))
+    }
+
+    resp, err := client.Do(request)
+    if err != nil {
+        return "", err
+    }
+    defer resp.Body.Close()
+
+    body, err := ioutil.ReadAll(resp.Body)
+    if err != nil {
+        return "", err
+    }
+
+    return string(body), nil
 }
 
 // replaceAll replaces all occurrences of a value in a string with the given
@@ -218,4 +266,24 @@ func hostname() (string, error) {
 	}
 
     return hostname, nil
+}
+
+func fromJson(data string) (interface{}, error) {
+    var result interface{}
+
+    if err := json.Unmarshal([]byte(data), &result); err != nil {
+        return result, err
+    }
+    
+    return result, nil
+}
+
+func fromJsonArray(data string) ([]interface{}, error) {
+    var result []interface{}
+
+    if err := json.Unmarshal([]byte(data), &result); err != nil {
+        return result, err
+    }
+    
+    return result, nil
 }
