@@ -4,6 +4,7 @@ import (
     "io"
     "log"
     "bytes"
+    "net/url"
     "net/http"
     "time"
     "io/ioutil"
@@ -41,17 +42,33 @@ func NewHttpClient(timeout time.Duration) *HttpClient {
     return client
 }
 
-func (h *HttpClient) NewRequest(method, path string, data []byte, cfg HttpConfig) (Response, error) {
+func (h *HttpClient) NewRequest(method, path, hash string, data []byte, cfg HttpConfig) (Response, error) {
 
     var resp Response
 
-    for _, url := range cfg.URLs {
+    for _, URL := range cfg.URLs {
 
-        var reader io.ReadCloser
-
-        req, err := http.NewRequest(method, url+path, bytes.NewReader(data))
+        // parse url path
+        u, err := url.Parse(URL)
         if err != nil {
-            log.Printf("[error] %s - %v", url, err)
+            return resp, err
+        }
+        if path != "" {
+            u.Path = u.Path + path
+        }
+        if hash != "" {
+            // add parameter to query string
+            queryString := u.Query()
+            queryString.Set("hash", hash)
+            // add query to url
+            u.RawQuery = queryString.Encode()
+        }
+
+        //log.Printf("%v", u.String())
+
+        req, err := http.NewRequest(method, u.String(), bytes.NewReader(data))
+        if err != nil {
+            log.Printf("[error] %v", err)
             continue
         }
         if method == "PUT"{
@@ -66,18 +83,20 @@ func (h *HttpClient) NewRequest(method, path string, data []byte, cfg HttpConfig
 
         r, err := h.client.Do(req)
         if err != nil {
-            log.Printf("[error] %s - %v", url, err)
+            log.Printf("[error] %v", err)
             continue
         }
         defer r.Body.Close()
         resp.StatusCode = r.StatusCode
+
+        var reader io.ReadCloser
 
         // Check that the server actual sent compressed data
         switch r.Header.Get("Content-Encoding") {
             case "gzip":
                 reader, err = gzip.NewReader(r.Body)
                 if err != nil {
-                    log.Printf("[error] %s - %v", url, err)
+                    log.Printf("[error] %s - %v", u.String(), err)
                     continue
                 }
                 defer reader.Close()
@@ -85,14 +104,14 @@ func (h *HttpClient) NewRequest(method, path string, data []byte, cfg HttpConfig
                 reader = r.Body
         }
 
-        if r.StatusCode >= 400 {
-            log.Printf("[error] when request to [%s] received status code: %d", url+path, r.StatusCode)
+        if r.StatusCode >= 500 {
+            log.Printf("[error] when request to [%s] received status code: %d", u.String(), r.StatusCode)
             continue
         }
 
         body, err := ioutil.ReadAll(reader)
         if err != nil {
-            log.Printf("[error] when reading to [%s] received error: %v", url+path, err)
+            log.Printf("[error] when reading to [%s] received error: %v", u.String(), err)
             continue
         }
         resp.Body = body

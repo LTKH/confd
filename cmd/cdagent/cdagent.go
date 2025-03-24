@@ -7,22 +7,24 @@ import (
     "os/signal"
     "syscall"
     "flag"
-    "sync"
+    //"sync"
     "fmt"
     //"net/http"
+    //"net/url"
     "runtime"
     "os/exec"
     "context"
     "encoding/json"
     "io/ioutil"
     "math/rand"
-    "crypto/md5"
-    "encoding/hex"
+    //"crypto/md5"
+    //"encoding/hex"
     //"github.com/gorilla/mux"
     "github.com/naoina/toml"
     "gopkg.in/natefinch/lumberjack.v2"
     "github.com/ltkh/confd/internal/template"
     "github.com/ltkh/confd/internal/client"
+    "github.com/ltkh/confd/internal/config"
 )
 
 var (
@@ -43,6 +45,7 @@ type Global struct {
 type HTTPTemplate struct {
     URLs             []string                `toml:"urls"`
     Path             string                  `toml:"path"`
+    Hash             string                  `toml:"-"`
     Create           bool                    `toml:"create"`
     Src              string                  `toml:"src"`
     SrcMatch         string                  `toml:"src_match"`
@@ -50,6 +53,7 @@ type HTTPTemplate struct {
     Dest             string                  `toml:"dest"`
     CheckCmd         string                  `toml:"check_cmd"`
     ReloadCmd        string                  `toml:"reload_cmd"`
+    Interval         string                  `toml:"interval"`
     Timeout          string                  `toml:"timeout"`
     ContentEncoding  string                  `toml:"content_encoding"`
     Headers          map[string]string       `toml:"headers"`
@@ -89,44 +93,123 @@ func randURLs(urls []string) []string {
     return urls
 }
 
-func getHash(data []byte) string {
-    hsh := md5.New()
-    hsh.Write(data)
-    return hex.EncodeToString(hsh.Sum(nil))
-}
+func (t *HTTPTemplate) CreateConf(jsn interface{}) (int, error) {
 
-func (h *HTTPTemplate) CreateConf(jsn interface{}) (int, error) {
-
-    if h.SrcMatch == "" {
-        h.SrcMatch = h.Src
+    if t.SrcMatch == "" {
+        t.SrcMatch = t.Src
     }
 
-    cont, err := template.New(h.Src).ParseGlob(h.SrcMatch, jsn)
+    cont, err := template.New(t.Src).ParseGlob(t.SrcMatch, jsn)
     if err != nil {
         return 3, fmt.Errorf("generating config: %v", err)
     }
 
-    if _, err := os.Stat(h.Dest); err == nil {
-        conf, err := ioutil.ReadFile(h.Dest)
+    if _, err := os.Stat(t.Dest); err == nil {
+        conf, err := ioutil.ReadFile(t.Dest)
         if err != nil {
-            return 4, fmt.Errorf("reading config file %s: %v", h.Dest, err)
+            return 4, fmt.Errorf("reading config file %s: %v", t.Dest, err)
         }
-        if getHash(conf) != getHash(cont) {
-            if err := ioutil.WriteFile(h.Temp, cont, 0644); err != nil {
-                return 4, fmt.Errorf("writing config file %s: %v", h.Dest, err)
+        if config.GetHash(conf) != config.GetHash(cont) {
+            if err := ioutil.WriteFile(t.Temp, cont, 0644); err != nil {
+                return 4, fmt.Errorf("writing config file %s: %v", t.Dest, err)
             }
             return 1, nil
         }
     } else if os.IsNotExist(err) {
-        if err := ioutil.WriteFile(h.Temp, cont, 0644); err != nil {
-            return 4, fmt.Errorf("writing config file %s: %v", h.Dest, err)
+        if err := ioutil.WriteFile(t.Temp, cont, 0644); err != nil {
+            return 4, fmt.Errorf("writing config file %s: %v", t.Dest, err)
         }
         return 1, nil
     } else {
-        return 4, fmt.Errorf("reading config file status %s: %v", h.Dest, err)
+        return 4, fmt.Errorf("reading config file status %s: %v", t.Dest, err)
     }
 
     return 0, nil
+}
+
+func (t *HTTPTemplate) CreateTemplate(httpClient *client.HttpClient, path, plugin string) error {
+    if t.Temp == "" {
+        t.Temp = t.Dest
+    }
+
+    httpConfig := client.HttpConfig{
+        URLs: randURLs(t.URLs),
+        ContentEncoding: t.ContentEncoding,
+    }
+
+    resp, err := httpClient.NewRequest("GET", path, t.Hash, nil, httpConfig)
+    if err != nil {
+        return err
+    }
+
+    if resp.StatusCode == 204 {
+        return nil
+    }
+
+    if resp.StatusCode == 404 && t.Create {
+        httpClient.NewRequest("PUT", path, "", []byte("dir=true"), httpConfig)
+        return nil
+    }
+
+    t.Hash = config.GetHash(resp.Body)
+
+    var jsn interface{}
+    if err := json.Unmarshal(resp.Body, &jsn); err != nil {
+        log.Printf("[error] %v", err)
+        if plugin == "telegraf" || plugin == "windows" {    
+            fmt.Printf("confd,src=%s,dest=%s success=%d\n", t.Src, t.Dest, 1)
+        }
+        return err
+    }
+
+    succ, err := t.CreateConf(jsn)
+    if err != nil {
+        log.Printf("[error] %v", err)
+        if plugin == "telegraf" || plugin == "windows" {    
+            fmt.Printf("confd,src=%s,dest=%s success=%d\n", t.Src, t.Dest, succ)
+        }
+        return err
+    }
+
+    if succ == 1 {
+        if t.CheckCmd != "" {
+            _, err := runCommand(t.CheckCmd, 10)
+            if err != nil {
+                log.Printf("[error] %v", err)
+                if plugin == "telegraf" || plugin == "windows" {
+                    fmt.Printf("confd,src=%s,dest=%s success=%d\n", t.Src, t.Dest, 3)
+                }
+                return err
+            } 
+        }
+
+        if t.Temp != t.Dest {
+            err := os.Rename(t.Temp, t.Dest)
+            if err != nil {
+                log.Printf("[error] %v", err)
+                if plugin == "telegraf" || plugin == "windows" {
+                    fmt.Printf("confd,src=%s,dest=%s success=%d\n", t.Src, t.Dest, 3)
+                }
+                return err
+            }
+        }
+
+        if plugin == "telegraf" || plugin == "windows" {
+            fmt.Printf("confd,src=%s,dest=%s success=%d\n", t.Src, t.Dest, 1)
+        }
+
+        if t.ReloadCmd != "" {
+            runCommand(t.ReloadCmd, 10)
+        }
+
+        return nil
+    }
+
+    if plugin == "telegraf" || plugin == "windows" {
+        fmt.Printf("confd,src=%s,dest=%s success=%d\n", t.Src, t.Dest, 0)
+    }
+
+    return nil
 }
 
 func runCommand(scmd string, timeout time.Duration) ([]byte, error) {
@@ -274,132 +357,64 @@ func main() {
         }
     }()
 
+    for _, tl := range cfg.Templates {
+
+        // Set default URLs
+        if len(tl.URLs) == 0 {
+            for _, u := range cfg.Global.URLs {
+                tl.URLs = append(tl.URLs, u)
+            }
+        }
+        if len(tl.URLs) == 0 {
+            continue
+        }
+
+        // Set default ContentEncoding
+        if tl.ContentEncoding == "" {
+            tl.ContentEncoding = cfg.Global.ContentEncoding
+        }
+
+        // Set Interval
+        if tl.Interval == "" {
+            tl.Interval = "30s"
+        }
+        tlInterval, _ := time.ParseDuration(tl.Interval)
+        if tlInterval == 0 {
+            log.Fatal("[error] setting interval: invalid duration")
+        }
+
+        // Set Timeout
+        if tl.Timeout == "" {
+            tl.Timeout = "5s"
+        }
+        tlTimeout, _ := time.ParseDuration(tl.Timeout)
+        if tlTimeout == 0 {
+            log.Fatal("[error] setting timeout: invalid duration")
+        }
+
+        httpClient := client.NewHttpClient(tlTimeout)
+
+        path, err := template.New(tl.Path).Execute(tl.Path, nil)
+        if err != nil {
+            log.Printf("[error] %v", err)
+            continue
+        }
+
+        go func(t *HTTPTemplate, path string) {
+            for {
+                if err := t.CreateTemplate(httpClient, path, *plugin); err != nil {
+                    log.Printf("[error] %v", err)
+                }
+                time.Sleep(tlInterval)
+            }
+        }(tl, string(path))
+    }
+
     // Daemon mode
     for (run) {
-
         if *plugin == "telegraf" {
             run = false
         }
-
-        var wg sync.WaitGroup
-
-        for _, tl := range cfg.Templates {
-
-            // Set default URLs
-            if len(tl.URLs) == 0 {
-                for _, u := range cfg.Global.URLs {
-                    tl.URLs = append(tl.URLs, u)
-                }
-            }
-            if len(tl.URLs) == 0 {
-                continue
-            }
-
-            // Set default ContentEncoding
-            if tl.ContentEncoding == "" {
-                tl.ContentEncoding = cfg.Global.ContentEncoding
-            }
-
-            // Set Timeout
-            if tl.Timeout == "" {
-                tl.Timeout = "5s"
-            }
-            tlTimeout, _ := time.ParseDuration(tl.Timeout)
-            if tlTimeout == 0 {
-                log.Fatal("[error] setting timeout: invalid duration")
-            }
-
-            httpClient := client.NewHttpClient(tlTimeout)
-
-            path, err := template.New(tl.Path).Execute(tl.Path, nil)
-            if err != nil {
-                log.Printf("[error] %v", err)
-                continue
-            }
-
-            wg.Add(1)
-
-            go func(t *HTTPTemplate, path string) {
-                defer wg.Done()
-
-                if t.Temp == "" {
-                    t.Temp = t.Dest
-                }
-
-                config := client.HttpConfig{
-                    URLs: randURLs(t.URLs),
-                    ContentEncoding: t.ContentEncoding,
-                }
-
-                resp, err := httpClient.NewRequest("GET", path, nil, config)
-                if err != nil {
-                    if resp.StatusCode == 404 && t.Create {
-                        httpClient.NewRequest("PUT", path, []byte("dir=true"), config)
-                    }
-                    log.Printf("[error] %v", err)
-                    return
-                }
-
-                var jsn interface{}
-                if err := json.Unmarshal(resp.Body, &jsn); err != nil {
-                    log.Printf("[error] %v", err)
-                    if *plugin == "telegraf" || *plugin == "windows" {    
-                        fmt.Printf("confd,src=%s,dest=%s success=%d\n", t.Src, t.Dest, 1)
-                    }
-                    return
-                }
-
-                succ, err := t.CreateConf(jsn)
-                if err != nil {
-                    log.Printf("[error] %v", err)
-                    if *plugin == "telegraf" || *plugin == "windows" {    
-                        fmt.Printf("confd,src=%s,dest=%s success=%d\n", t.Src, t.Dest, succ)
-                    }
-                    return
-                }
-
-                if succ == 1 {
-                    if t.CheckCmd != "" {
-                        _, err := runCommand(t.CheckCmd, 10)
-                        if err != nil {
-                            log.Printf("[error] %v", err)
-                            if *plugin == "telegraf" || *plugin == "windows" {
-                                fmt.Printf("confd,src=%s,dest=%s success=%d\n", t.Src, t.Dest, 3)
-                            }
-                            return
-                        } 
-                    }
-
-                    if t.Temp != t.Dest {
-                        err := os.Rename(t.Temp, t.Dest)
-                        if err != nil {
-                            log.Printf("[error] %v", err)
-                            if *plugin == "telegraf" || *plugin == "windows" {
-                                fmt.Printf("confd,src=%s,dest=%s success=%d\n", t.Src, t.Dest, 3)
-                            }
-                            return
-                        }
-                    }
-
-                    if *plugin == "telegraf" || *plugin == "windows" {
-                        fmt.Printf("confd,src=%s,dest=%s success=%d\n", t.Src, t.Dest, 1)
-                    }
-
-                    if t.ReloadCmd != "" {
-                        runCommand(t.ReloadCmd, 10)
-                    }
-
-                    return
-                }
-
-                if *plugin == "telegraf" || *plugin == "windows" {
-                    fmt.Printf("confd,src=%s,dest=%s success=%d\n", t.Src, t.Dest, 0)
-                }
-
-            }(tl, string(path))
-        }
-        
-        wg.Wait()
 
         time.Sleep(time.Duration(*interval) * time.Second)
     }

@@ -2,6 +2,8 @@ package config
 
 import (
     "io/ioutil"
+	"crypto/md5"
+    "encoding/hex"
 	"gopkg.in/yaml.v2"
 )
 
@@ -29,6 +31,12 @@ type Attributes struct {
 type Global struct {
 	CertFile         string             `yaml:"cert_file"`
 	CertKey          string             `yaml:"cert_key"`
+}
+
+func GetHash(data []byte) string {
+    hsh := md5.New()
+    hsh.Write(data)
+    return hex.EncodeToString(hsh.Sum(nil))
 }
 
 func LoadConfigFile(filename string) (*Config, error) {

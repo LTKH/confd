@@ -147,6 +147,14 @@ func (a *ApiEtcd) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+        hash, ok := r.URL.Query()["hash"]
+        if ok && hash[0] != "" {
+            if hash[0] == config.GetHash(data) {
+                w.WriteHeader(204)
+                return
+            }
+        }
+
         w.Header().Set("Content-Type", "application/json")
 		w.Write(data)
 

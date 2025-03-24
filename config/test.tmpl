@@ -2,7 +2,7 @@
     {{ $val.configuration.type }}
     {{ range $k, $v := $val.configuration.urls -}}
         {{ if not (connectHttp "GET" $v 200) }}
-            {{ warn "test" }}
+            test
         {{ end }}
     {{ end }}
 {{ end }}
