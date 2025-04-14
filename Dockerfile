@@ -1,14 +1,14 @@
 ARG GOLANG_IMAGE="golang:latest"
-ARG REDHAT_IMAGE="redhat/ubi8:latest"
+#ARG REDHAT_IMAGE="redhat/ubi8:latest"
 
-FROM ${GOLANG_IMAGE} AS builder
+FROM ${GOLANG_IMAGE}
 
 COPY . /src/
 WORKDIR /src/
 
 RUN go build -o /bin/cdserver cmd/cdserver/cdserver.go
 
-FROM ${REDHAT_IMAGE}
+#FROM ${REDHAT_IMAGE}
 
 EXPOSE 8084
 
@@ -22,8 +22,10 @@ RUN mkdir /data && chmod 755 /data && \
     useradd -M --uid $USER_ID --gid $GROUP_ID --home /data $USER_NAME && \
     chown -R $USER_NAME:$GROUP_NAME /data
 
-COPY --from=builder /bin/cdserver /bin/cdserver
+#COPY --from=builder /bin/cdserver /bin/cdserver
 COPY config/config.yml /etc/cdserver.yml
+
+RUN rm -rf /src
 
 USER $USER_NAME
 
