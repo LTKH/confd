@@ -1,4 +1,4 @@
-ARG GOLANG_IMAGE="golang:latest"
+ARG GOLANG_IMAGE="golang:1.20.3"
 #ARG REDHAT_IMAGE="redhat/ubi8:latest"
 
 FROM ${GOLANG_IMAGE}
