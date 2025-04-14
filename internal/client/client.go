@@ -4,7 +4,7 @@ import (
     "io"
     "log"
     "bytes"
-    "net/url"
+    //"net/url"
     "net/http"
     "time"
     "io/ioutil"
@@ -46,27 +46,9 @@ func (h *HttpClient) NewRequest(method, path, hash string, data []byte, cfg Http
 
     var resp Response
 
-    for _, URL := range cfg.URLs {
+    for _, cfgUrl := range cfg.URLs {
 
-        // parse url path
-        u, err := url.Parse(URL)
-        if err != nil {
-            return resp, err
-        }
-        if path != "" {
-            u.Path = u.Path + path
-        }
-        if hash != "" {
-            // add parameter to query string
-            queryString := u.Query()
-            queryString.Set("hash", hash)
-            // add query to url
-            u.RawQuery = queryString.Encode()
-        }
-
-        //log.Printf("%v", u.String())
-
-        req, err := http.NewRequest(method, u.String(), bytes.NewReader(data))
+        req, err := http.NewRequest(method, cfgUrl+path, bytes.NewReader(data))
         if err != nil {
             log.Printf("[error] %v", err)
             continue
@@ -80,6 +62,7 @@ func (h *HttpClient) NewRequest(method, path, hash string, data []byte, cfg Http
         }
 
         req.Header.Set("Accept-Encoding", "gzip")
+        req.Header.Set("X-Custom-Hash", hash)
 
         r, err := h.client.Do(req)
         if err != nil {
@@ -96,7 +79,7 @@ func (h *HttpClient) NewRequest(method, path, hash string, data []byte, cfg Http
             case "gzip":
                 reader, err = gzip.NewReader(r.Body)
                 if err != nil {
-                    log.Printf("[error] %s - %v", u.String(), err)
+                    log.Printf("[error] %s - %v", path, err)
                     continue
                 }
                 defer reader.Close()
@@ -105,13 +88,13 @@ func (h *HttpClient) NewRequest(method, path, hash string, data []byte, cfg Http
         }
 
         if r.StatusCode >= 500 {
-            log.Printf("[error] when request to [%s] received status code: %d", u.String(), r.StatusCode)
+            log.Printf("[error] when request to [%s] received status code: %d", path, r.StatusCode)
             continue
         }
 
         body, err := ioutil.ReadAll(reader)
         if err != nil {
-            log.Printf("[error] when reading to [%s] received error: %v", u.String(), err)
+            log.Printf("[error] when reading to [%s] received error: %v", path, err)
             continue
         }
         resp.Body = body

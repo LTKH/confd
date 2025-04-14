@@ -1,19 +1,26 @@
-FROM golang:1.20.3 AS builder
+ARG GOLANG_IMAGE="golang:latest"
+ARG ALPINE_IMAGE="alpine:latest"
+
+FROM ${GOLANG_IMAGE} AS builder
 
 COPY . /src/
 WORKDIR /src/
+
 RUN go build -o /bin/cdserver cmd/cdserver/cdserver.go
 
-FROM alpine:latest
+FROM ${ALPINE_IMAGE}
 
 EXPOSE 8084
 
 ENV USER_ID=1000
+ENV GROUP_ID=1000
 ENV USER_NAME=cdserver
+ENV GROUP_NAME=cdserver
 
 RUN mkdir /data && chmod 755 /data && \
-    adduser -D -u $USER_ID -h /data $USER_NAME && \
-    chown -R $USER_NAME /data
+    addgroup -S -g $GROUP_ID $GROUP_NAME && \
+    adduser -S -u $USER_ID -G $GROUP_NAME $USER_NAME && \
+    chown -R $USER_NAME:$GROUP_NAME /data
 
 COPY --from=builder /bin/cdserver /bin/cdserver
 COPY config/config.yml /etc/cdserver.yml

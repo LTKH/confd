@@ -10,7 +10,7 @@ import (
     //"sync"
     "fmt"
     //"net/http"
-    //"net/url"
+    "net/url"
     "runtime"
     "os/exec"
     "context"
@@ -39,7 +39,7 @@ type Config struct {
 type Global struct {
     URLs             []string                `toml:"urls"`
     ContentEncoding  string                  `toml:"content_encoding"`
-	ChecksFile       string                  `toml:"checks_file"`
+    ChecksFile       string                  `toml:"checks_file"`
 }
 
 type HTTPTemplate struct {
@@ -146,8 +146,20 @@ func (t *HTTPTemplate) CreateTemplate(httpClient *client.HttpClient, path, plugi
         return nil
     }
 
-    if resp.StatusCode == 404 && t.Create {
-        httpClient.NewRequest("PUT", path, "", []byte("dir=true"), httpConfig)
+    if resp.StatusCode == 404 {
+        if t.Create {
+            // parse url path
+            u, err := url.Parse(path)
+            if err != nil {
+                return err
+            }
+
+            httpClient.NewRequest("PUT", u.Path, "", []byte("dir=true"), httpConfig)
+        }
+        return nil
+    }
+
+    if resp.StatusCode != 200 {
         return nil
     }
 

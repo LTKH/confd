@@ -133,7 +133,11 @@ func (a *ApiEtcd) ServeHTTP(w http.ResponseWriter, r *http.Request) {
         resp, err := kapi.Get(context.Background(), path, opts)
         if err != nil {
             log.Printf("[error] %v", err)
-            w.WriteHeader(404)
+            if strings.Contains(err.Error(), "100: Key not found") {
+                w.WriteHeader(404)
+            } else {
+                w.WriteHeader(500)
+            }
             w.Write([]byte(err.Error()))
             return
         }
@@ -141,22 +145,23 @@ func (a *ApiEtcd) ServeHTTP(w http.ResponseWriter, r *http.Request) {
         jsn := getEtcdNodes(resp.Node.Nodes)
 
         data, err := json.Marshal(jsn)
-		if err != nil {
-			log.Printf("[error] %v", err)
+        if err != nil {
+            log.Printf("[error] %v", err)
             w.WriteHeader(500)
-			return
-		}
+            return
+        }
 
-        hash, ok := r.URL.Query()["hash"]
-        if ok && hash[0] != "" {
-            if hash[0] == config.GetHash(data) {
+        hash := r.Header.Get("X-Custom-Hash")
+        if hash != "" {
+            if hash == config.GetHash(data) {
                 w.WriteHeader(204)
                 return
             }
         }
 
         w.Header().Set("Content-Type", "application/json")
-		w.Write(data)
+        w.Header().Set("X-Custom-Hash", config.GetHash(data))
+        w.Write(data)
 
         return
 
@@ -206,14 +211,14 @@ func (a *ApiEtcd) ServeHTTP(w http.ResponseWriter, r *http.Request) {
         } 
 
         data, err := json.Marshal(resp)
-		if err != nil {
-			log.Printf("[error] %v", err)
+        if err != nil {
+            log.Printf("[error] %v", err)
             w.WriteHeader(500)
-			return
-		}
+            return
+        }
 
         w.Header().Set("Content-Type", "application/json")
-		w.Write(data)
+        w.Write(data)
 
         return
 
