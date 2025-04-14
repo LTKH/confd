@@ -1,5 +1,5 @@
 ARG GOLANG_IMAGE="golang:latest"
-ARG ALPINE_IMAGE="alpine:latest"
+ARG REDHAT_IMAGE="redhat/ubi8:latest"
 
 FROM ${GOLANG_IMAGE} AS builder
 
@@ -8,7 +8,7 @@ WORKDIR /src/
 
 RUN go build -o /bin/cdserver cmd/cdserver/cdserver.go
 
-FROM ${ALPINE_IMAGE}
+FROM ${REDHAT_IMAGE}
 
 EXPOSE 8084
 
@@ -18,8 +18,8 @@ ENV USER_NAME=cdserver
 ENV GROUP_NAME=cdserver
 
 RUN mkdir /data && chmod 755 /data && \
-    addgroup -S -g $GROUP_ID $GROUP_NAME && \
-    adduser -S -u $USER_ID -G $GROUP_NAME $USER_NAME && \
+    groupadd --gid $GROUP_ID $GROUP_NAME && \
+    useradd -M --uid $USER_ID --gid $GROUP_ID --home /data $USER_NAME && \
     chown -R $USER_NAME:$GROUP_NAME /data
 
 COPY --from=builder /bin/cdserver /bin/cdserver
