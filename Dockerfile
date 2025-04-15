@@ -1,15 +1,14 @@
-ARG GOLANG_IMAGE="golang:alpine"
-ARG ALPINE_IMAGE="alpine"
+ARG GOLANG_IMAGE="golang:1.21.0"
+ARG BUSYBOX_IMAGE="busybox:1.37.0"
 
 FROM ${GOLANG_IMAGE} AS builder
 
 COPY . /src/
 WORKDIR /src/
 
-RUN apk add --no-cache --update go gcc g++
-RUN CGO_ENABLED=1 go build -o /bin/cdserver cmd/cdserver/cdserver.go
+RUN CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -o /bin/cdserver cmd/cdserver/cdserver.go
 
-FROM ${ALPINE_IMAGE}
+FROM ${BUSYBOX_IMAGE}
 
 EXPOSE 8083
 
@@ -23,10 +22,10 @@ RUN mkdir /data && chmod 755 /data && \
     adduser -S -u $USER_ID -G $GROUP_NAME $USER_NAME && \
     chown -R $USER_NAME:$GROUP_NAME /data
 
+USER $USER_NAME
+
 COPY --from=builder /bin/cdserver /bin/cdserver
 COPY config/config.yml /etc/cdserver.yml
-
-USER $USER_NAME
 
 ENTRYPOINT ["/bin/cdserver"]
 CMD ["-config.file=/etc/cdserver.yml"]
