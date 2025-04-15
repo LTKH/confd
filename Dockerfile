@@ -6,6 +6,7 @@ FROM ${GOLANG_IMAGE} AS builder
 COPY . /src/
 WORKDIR /src/
 
+RUN apk add --no-cache --update go gcc g++
 RUN go build -o /bin/cdserver cmd/cdserver/cdserver.go
 
 FROM ${ALPINE_IMAGE}
