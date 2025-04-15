@@ -1,14 +1,14 @@
 ARG GOLANG_IMAGE="golang:1.21.0"
-ARG BUSYBOX_IMAGE="busybox:1.37.0"
+ARG RUNNER_IMAGE="busybox:1.37.0"
 
 FROM ${GOLANG_IMAGE} AS builder
 
 COPY . /src/
 WORKDIR /src/
 
-RUN CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -o /bin/cdserver cmd/cdserver/cdserver.go
+RUN go build -o /bin/cdserver cmd/cdserver/cdserver.go
 
-FROM ${BUSYBOX_IMAGE}
+FROM ${RUNNER_IMAGE}
 
 EXPOSE 8083
 
