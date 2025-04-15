@@ -1,5 +1,5 @@
-ARG GOLANG_IMAGE="golang:1.18.3-alpine"
-ARG ALPINE_IMAGE="alpine:3.21.3"
+ARG GOLANG_IMAGE="golang:alpine"
+ARG ALPINE_IMAGE="alpine"
 
 FROM ${GOLANG_IMAGE} AS builder
 
