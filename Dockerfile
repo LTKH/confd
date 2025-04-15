@@ -10,7 +10,7 @@ RUN go build -o /bin/cdserver cmd/cdserver/cdserver.go
 
 FROM ${ALPINE_IMAGE}
 
-EXPOSE 8084
+EXPOSE 8083
 
 ENV USER_ID=1000
 ENV GROUP_ID=1000
