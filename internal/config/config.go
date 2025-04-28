@@ -1,6 +1,10 @@
 package config
 
 import (
+    "os"
+    "log"
+    "regexp"
+    "strings"
     "io/ioutil"
     "crypto/md5"
     "encoding/hex"
@@ -16,21 +20,50 @@ type Backend struct {
     Backend          string             `yaml:"backend"`
     Id               string             `yaml:"id"`
     Nodes            []string           `yaml:"nodes"`
-    Username         string             `yaml:"username"`
-    Password         string             `yaml:"password"`
     Write            Attributes         `yaml:"write"`
     Read             Attributes         `yaml:"read"`
+    Checks           []*Scheme          `yaml:"checks"`
+    Users            map[string]string           
+}
+
+type Scheme struct {
+    Path             string             `yaml:"path"`
+    RePath           *regexp.Regexp
+    Regexp           string             `yaml:"regexp"`
+    ReRegexp         *regexp.Regexp
+    Method           string             `yaml:"method"`
+    Schema           string             `yaml:"schema"`
+    Users            []string           `yaml:"users"`
+    Dir              string             `yaml:"dir"`
 }
 
 type Attributes struct {
     Username         string             `yaml:"username"`
     Password         string             `yaml:"password"`
-    KeyMasks         []string           `yaml:"keys"`
 }
 
 type Global struct {
     CertFile         string             `yaml:"cert_file"`
     CertKey          string             `yaml:"cert_key"`
+    Users            []*UserInfo        `yaml:"users"`
+}
+
+type UserInfo struct {
+    Username         string             `yaml:"username"`
+    Password         string             `yaml:"password"`
+}
+
+func getEnv(value string) string {
+    if len(value) > 0 && string(value[0]) == "$" {
+        val, ok := os.LookupEnv(strings.TrimPrefix(value, "$"))
+        if !ok {
+            log.Printf("[error] no value found for %v", value)
+            return ""
+        }
+        return val
+    }
+
+    return value
 }
 
 func GetHash(data []byte) string {
@@ -49,6 +82,41 @@ func LoadConfigFile(filename string) (*Config, error) {
 
     if err := yaml.UnmarshalStrict(content, cfg); err != nil {
         return cfg, err
+    }
+
+    for u, usr := range cfg.Global.Users {
+        cfg.Global.Users[u].Username = getEnv(usr.Username)
+        cfg.Global.Users[u].Password = getEnv(usr.Password)
+    }
+
+    for b, backend := range cfg.Backends {
+        cfg.Backends[b].Users = map[string]string{}
+
+        for _, usr := range cfg.Global.Users {
+            cfg.Backends[b].Users[usr.Username] = usr.Password
+        }
+
+        cfg.Backends[b].Read.Username = getEnv(backend.Read.Username)
+        cfg.Backends[b].Read.Password = getEnv(backend.Read.Password)
+        cfg.Backends[b].Write.Username = getEnv(backend.Write.Username)
+        cfg.Backends[b].Write.Password = getEnv(backend.Write.Password)
+
+        for _, check := range backend.Checks {
+            if check.Path != "" {
+                re, err := regexp.Compile(check.Path)
+                if err != nil {
+                    log.Fatalf("[error] %v", err)
+                }
+                check.RePath = re
+            }
+            if check.Regexp != "" {
+                re, err := regexp.Compile(check.Regexp)
+                if err != nil {
+                    log.Fatalf("[error] %v", err)
+                }
+                check.ReRegexp = re
+            }
+        }
     }
     
     return cfg, nil

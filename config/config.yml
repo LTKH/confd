@@ -1,22 +1,37 @@
 global:
   cert_file:        ""
   cert_key:         ""
+  users:
+    - username:     "test"
+      password:     "test"
+    - username:     "test1"
+      password:     "test1"
 
 backends:
-
   - backend:        "etcd"
     id:             "etcd"
     nodes:          ["http://127.0.0.1:2379"]
-    write:
-      username:       ""
-      password:       ""
-      keys:           [".*"]
     read:
-      keys:           [".*"]
+      username:     ""
+      password:     ""
+    write:
+      username:     ""
+      password:     ""
+    checks:
+      - method:     "GET"
+        path:       ".*"
+        users:      ["test","test1"]
+      - method:     "PUT"
+        path:       ".*"
+        regexp:     ""
+        schema:     ""
+        users:      ["test","test1"]
+      - method:     "DELETE"
+        path:       ".*"
+        regexp:     ""
+        schema:     ""
+        users:      ["test","test1"]
 
   - backend:        "consul"
     id:             "consul"
     nodes:          ["http://127.0.0.1:8500"]
-    write:
-      username:       ""
-      password:       ""

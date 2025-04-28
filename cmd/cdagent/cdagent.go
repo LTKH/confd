@@ -40,6 +40,7 @@ type Global struct {
     URLs             []string                `toml:"urls"`
     ContentEncoding  string                  `toml:"content_encoding"`
     ChecksFile       string                  `toml:"checks_file"`
+    PKey             string                  `toml:"pkey"`
 }
 
 type HTTPTemplate struct {

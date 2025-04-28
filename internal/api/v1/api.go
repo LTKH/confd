@@ -57,12 +57,12 @@ func GetConsulClient(back config.Backend) (*api.Client, error) {
 		conf.Address = back.Nodes[0]
 	}
     
-    if back.Username != "" && back.Password != "" {
-        conf.HttpAuth = &api.HttpBasicAuth{
-            Username: back.Username,
-            Password: back.Password,
-        }
-    }
+    //if back.Username != "" && back.Password != "" {
+    //    conf.HttpAuth = &api.HttpBasicAuth{
+    //        Username: back.Username,
+    //        Password: back.Password,
+    //    }
+    //}
 
     client, err := api.NewClient(conf)
 	if err != nil {
