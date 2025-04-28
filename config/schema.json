@@ -1,0 +1,10 @@
+{
+    "$id" : "http://google.com/main.json",
+    "type": "object",
+    "properties": {
+        "product": {
+            "$id": "/properties/product",
+            "type": "string"
+        }
+    }
+}

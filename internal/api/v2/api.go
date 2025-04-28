@@ -10,6 +10,7 @@ import (
     "context"
     "encoding/json"
     "github.com/coreos/etcd/client"
+    "github.com/xeipuuv/gojsonschema"
     "github.com/ltkh/confd/internal/config"
 )
 
@@ -126,9 +127,22 @@ func backendChecks(backend *config.Backend, path string, r *http.Request) (int, 
             }
 
             if check.Schema != "" {
-                return 400, errors.New("Invalid schema")
+                schema := gojsonschema.NewReferenceLoader(check.Schema)
+                document := gojsonschema.NewStringLoader(val)
+
+                result, err := gojsonschema.Validate(schema, document)
+                if err != nil {
+                    return 400, err
+                }
+
+                if !result.Valid() {
+                    for _, desc := range result.Errors() {
+                        return 400, errors.New(desc.String())
+                    }
+                }
             }
         }
+        break
     } 
 
     return 0, nil
