@@ -30,7 +30,7 @@ backends:
         path:       ".*"
         regexp:     ""
         schema:     ""
-        users:      ["test","test1"]
+        #users:      ["test","test1"]
 
   - backend:        "consul"
     id:             "consul"

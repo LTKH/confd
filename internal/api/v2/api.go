@@ -3,11 +3,13 @@ package v2
 import (
     "log"
     "net/http"
+    "net/url"
     "time"
     "regexp"
     "errors"
     "strings"
     "context"
+    "io/ioutil"
     "encoding/json"
     "github.com/coreos/etcd/client"
     "github.com/xeipuuv/gojsonschema"
@@ -68,6 +70,9 @@ func getEtcdNodes(nodes client.Nodes) (map[string]interface{}) {
 }
 
 func inArray(val string, arr []string) bool {
+    if val == nil {
+        val = ""
+    }
     for _, v := range arr {
         if v == val {
             return true
@@ -77,14 +82,36 @@ func inArray(val string, arr []string) bool {
 }
 
 func parseForm(r *http.Request) (string, string, error) {
-    if err := r.ParseForm(); err != nil {
+    //if err := r.ParseForm(); err != nil {
+    //    return "", "", err
+    //}
+
+    //return r.PostForm.Get("dir"), r.PostForm.Get("value"), nil
+
+    if r.Method != http.MethodPut {
+        return "", "", nil
+    }
+
+    // Читаем тело запроса
+    bodyBytes, err := ioutil.ReadAll(r.Body)
+    if err != nil {
+        return "", "", err
+    }
+    defer r.Body.Close()
+
+    re := regexp.MustCompile(`%(25)?`)
+    bodyBytes = re.ReplaceAllLiteral(bodyBytes, []byte("%25"))
+
+    // Парсим тело как url-encoded параметры
+    params, err := url.ParseQuery(string(bodyBytes))
+    if err != nil {
         return "", "", err
     }
 
-    return r.PostForm.Get("dir"), r.PostForm.Get("value"), nil
+    return params.Get("dir"), params.Get("value"), nil
 }
 
-func backendChecks(backend *config.Backend, path string, r *http.Request) (int, error) {
+func backendChecks(backend *config.Backend, path, dir, val string, r *http.Request) (int, error) {
     for _, check := range backend.Checks {
         if r.Method != check.Method {
             continue
@@ -95,33 +122,31 @@ func backendChecks(backend *config.Backend, path string, r *http.Request) (int, 
         if len(check.Users) > 0 {
             user, pass, auth := r.BasicAuth()
 
-            if !auth {
-                return 401, errors.New("Unauthorized")
+            if auth {
+                val, ok := backend.Users[user]
+                if !ok || val != pass {
+                    return 403, errors.New("Access is denied")
+                }
             }
 
             if !inArray(user, check.Users) {
                 return 403, errors.New("Access is denied")
             }
-
-            if val, ok := backend.Users[user]; !ok || val != pass {
-                return 403, errors.New("Access is denied")
-            }
         }
         if r.Method == "PUT" || r.Method == "POST" {
-            dir, val, err := parseForm(r)
-            if err != nil {
-                return 400, err
+            if check.Dir == "true" && dir != "true" {
+                return 400, errors.New("Invalid parameter type: Directory expected")
             }
 
-            if check.Dir != dir {
-                return 400, errors.New("Invalid parameter type")
+            if check.Dir == "false" && dir == "true" {
+                return 400, errors.New("Invalid parameter type: Not directory expected")
             }
 
             if check.Regexp != "" {
-                if dir == "" && !check.ReRegexp.MatchString(val){
+                if dir != "true" && !check.ReRegexp.MatchString(val){
                     return 400, errors.New("Invalid parameter value")
                 }
-                if dir != "" && !check.ReRegexp.MatchString(dir){
+                if dir == "true" && !check.ReRegexp.MatchString(dir){
                     return 400, errors.New("Invalid parameter name")
                 }
             }
@@ -187,7 +212,15 @@ func (a *ApiEtcd) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
     path := strings.Replace(r.URL.Path, "/api/v2/"+a.Id, "", 1)
 
-    code, err := backendChecks(a.Backend, path, r)
+    dir, val, err := parseForm(r)
+    if err != nil {
+        log.Printf("[error] %v (%v)", err, r.URL.Path)
+        w.WriteHeader(400)
+        w.Write(encodeResp(&errResp{Error:400, Message:err.Error(), Cause: path}))
+        return
+    }
+
+    code, err := backendChecks(a.Backend, path, dir, val, r)
     if err != nil {
         log.Printf("[error] %d: %v (%v)", code, err.Error(), r.URL.Path)
         w.WriteHeader(code)
@@ -257,14 +290,6 @@ func (a *ApiEtcd) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
         opts := &client.SetOptions{}
 
-        dir, val, err := parseForm(r)
-        if err != nil {
-            log.Printf("[error] %v (%v)", err, r.URL.Path)
-            w.WriteHeader(400)
-            w.Write(encodeResp(&errResp{Error:400, Message:err.Error(), Cause: path}))
-            return
-        }
-
         if dir == "true" {
             opts.Dir = true
         }
@@ -273,6 +298,38 @@ func (a *ApiEtcd) ServeHTTP(w http.ResponseWriter, r *http.Request) {
         if err != nil {
             log.Printf("[error] %v (%v)", err, r.URL.Path)
             w.WriteHeader(502)
+            return
+        } 
+
+        data, err := json.Marshal(resp)
+        if err != nil {
+            log.Printf("[error] %v (%v)", err, r.URL.Path)
+            w.WriteHeader(500)
+            return
+        }
+
+        w.Write(data)
+        return
+    }
+
+    if r.Method == http.MethodDelete {
+
+        kapi := client.NewKeysAPI(*a.WriteClient)
+
+        opts := &client.DeleteOptions{}
+        if r.URL.Query().Get("recursive") == "true" {
+            opts.Recursive = true
+        }
+
+        resp, err := kapi.Delete(context.Background(), path, opts)
+        if err != nil {
+            log.Printf("[error] %v (%v)", err, r.URL.Path)
+            if strings.Contains(err.Error(), "100: Key not found") {
+                w.WriteHeader(404)
+                w.Write(encodeResp(&errResp{Error:404, Message:err.Error(), Cause: path}))
+            } else {
+                w.WriteHeader(500)
+            }
             return
         } 
 
