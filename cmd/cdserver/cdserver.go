@@ -76,7 +76,7 @@ func main() {
         back.Id = strings.TrimRight(back.Id, "/")
 
         if back.Backend == "etcd" {
-            etcdClient, err := v2.GetEtcdClient(back)
+            etcdClient, err := v2.GetEtcdClient(back, cfg.Logger)
             if err != nil {
                 log.Fatalf("[error] %v", err)
             }
