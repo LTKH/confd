@@ -20,8 +20,10 @@ type Config struct {
 type Global struct {
     CertFile         string                  `yaml:"cert_file"`
     CertKey          string                  `yaml:"cert_key"`
-    Users            []*UserInfo             `yaml:"users"`
+    Users            GlobUsers               `yaml:"users"`
 }
+
+type GlobUsers map[string]string
 
 type Logger struct {
     Urls             []string                `yaml:"urls"`
@@ -34,20 +36,24 @@ type Backend struct {
     Nodes            []string                `yaml:"nodes"`
     Write            Attributes              `yaml:"write"`
     Read             Attributes              `yaml:"read"`
-    Checks           []*Scheme               `yaml:"checks"`
-    Users            map[string]string           
+    Checks           map[string][]*Scheme    `yaml:"checks"`
+    //Users            map[string]string        
+    Cache            bool                    `yaml:"cache"`   
 }
 
 type Scheme struct {
+    //Method           string                  `yaml:"method"`
+    Pattern          string                  `yaml:"pattern"`
     Path             string                  `yaml:"path"`
     RePath           *regexp.Regexp
     Regexp           string                  `yaml:"regexp"`
     ReRegexp         *regexp.Regexp
-    Method           string                  `yaml:"method"`
     Schema           string                  `yaml:"schema"`
-    Users            []string                `yaml:"users"`
+    Users            Users                   `yaml:"users"`
     Dir              string                  `yaml:"dir"`
 }
+
+type Users map[string]string
 
 type Attributes struct {
     Username         string                  `yaml:"username"`
@@ -72,7 +78,7 @@ func getEnv(value string) string {
     if len(value) > 0 && string(value[0]) == "$" {
         val, ok := os.LookupEnv(strings.TrimPrefix(value, "$"))
         if !ok {
-            log.Printf("[error] no value found for %v", value)
+            log.Fatalf("[error] no value found for %v", value)
             return ""
         }
         return val
@@ -87,6 +93,40 @@ func GetHash(data []byte) string {
     return hex.EncodeToString(hsh.Sum(nil))
 }
 
+func (u *GlobUsers) UnmarshalYAML(unmarshal func(interface{}) error) error {
+    // Временная структура для чтения массива
+    var users []UserInfo
+    if err := unmarshal(&users); err != nil {
+        return err
+    }
+
+    // Создаем карту и заполняем её
+    result := make(map[string]string)
+    for _, usr := range users {
+        usr.Username = getEnv(usr.Username)
+        usr.Password = getEnv(usr.Password)
+        result[usr.Username] = usr.Password
+    }
+    *u = result
+    return nil
+}
+
+func (u *Users) UnmarshalYAML(unmarshal func(interface{}) error) error {
+    // Временная структура для чтения массива
+    var arr []string
+    if err := unmarshal(&arr); err != nil {
+        return err
+    }
+
+    // Создаем карту и заполняем её
+    result := make(map[string]string)
+    for _, item := range arr {
+        result[item] = ""
+    }
+    *u = result
+    return nil
+}
+
 func LoadConfigFile(filename string) (*Config, error) {
     cfg := &Config{}
 
@@ -99,37 +139,44 @@ func LoadConfigFile(filename string) (*Config, error) {
         return cfg, err
     }
 
-    for u, usr := range cfg.Global.Users {
-        cfg.Global.Users[u].Username = getEnv(usr.Username)
-        cfg.Global.Users[u].Password = getEnv(usr.Password)
-    }
+    //for u, usr := range cfg.Global.Users {
+    //    cfg.Global.Users[u].Username = getEnv(usr.Username)
+    //    cfg.Global.Users[u].Password = getEnv(usr.Password)
+    //}
 
     for b, backend := range cfg.Backends {
-        cfg.Backends[b].Users = map[string]string{}
+        //cfg.Backends[b].Users = map[string]string{}
 
-        for _, usr := range cfg.Global.Users {
-            cfg.Backends[b].Users[usr.Username] = usr.Password
-        }
+        //for _, usr := range cfg.Global.Users {
+        //    cfg.Backends[b].Users[usr.Username] = usr.Password
+        //}
 
         cfg.Backends[b].Read.Username = getEnv(backend.Read.Username)
         cfg.Backends[b].Read.Password = getEnv(backend.Read.Password)
         cfg.Backends[b].Write.Username = getEnv(backend.Write.Username)
         cfg.Backends[b].Write.Password = getEnv(backend.Write.Password)
 
-        for _, check := range backend.Checks {
-            if check.Path != "" {
-                re, err := regexp.Compile(check.Path)
-                if err != nil {
-                    log.Fatalf("[error] %v", err)
+        for method, _ := range backend.Checks {
+            for _, check := range backend.Checks[method] {
+                if check.Path != "" {
+                    re, err := regexp.Compile(check.Path)
+                    if err != nil {
+                        log.Fatalf("[error] %v", err)
+                    }
+                    check.RePath = re
                 }
-                check.RePath = re
-            }
-            if check.Regexp != "" {
-                re, err := regexp.Compile(check.Regexp)
-                if err != nil {
-                    log.Fatalf("[error] %v", err)
+                if check.Regexp != "" {
+                    re, err := regexp.Compile(check.Regexp)
+                    if err != nil {
+                        log.Fatalf("[error] %v", err)
+                    }
+                    check.ReRegexp = re
                 }
-                check.ReRegexp = re
+                for u, _ := range check.Users {
+                    if pass, ok := cfg.Global.Users[u]; ok {
+                        check.Users[u] = pass
+                    }
+                }
             }
         }
     }

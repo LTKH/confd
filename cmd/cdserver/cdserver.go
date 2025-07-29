@@ -9,7 +9,7 @@ import (
     "os"
     "os/signal"
     "syscall"
-    "strings"
+    //"strings"
     "gopkg.in/natefinch/lumberjack.v2"
     "github.com/prometheus/client_golang/prometheus/promhttp"
     "github.com/ltkh/confd/internal/api/v1"
@@ -71,15 +71,16 @@ func main() {
         w.Write([]byte("OK"))
     })
 
-    for _, back := range cfg.Backends {
+    http.Handle("/metrics", promhttp.Handler())
 
-        back.Id = strings.TrimRight(back.Id, "/")
+    for _, back := range cfg.Backends {
 
         if back.Backend == "etcd" {
             etcdClient, err := v2.GetEtcdClient(back, cfg.Logger)
             if err != nil {
                 log.Fatalf("[error] %v", err)
             }
+            http.Handle("/api/v2/"+back.Id, etcdClient)
             http.Handle("/api/v2/"+back.Id+"/", etcdClient)
         }
 
@@ -88,12 +89,11 @@ func main() {
             if err != nil {
                 log.Fatalf("[error] %v", err)
             }
+            http.Handle("/api/v1/"+back.Id, &v1.ApiConsul{Id: back.Id, Client: consulClient})
             http.Handle("/api/v1/"+back.Id+"/", &v1.ApiConsul{Id: back.Id, Client: consulClient})
         }
 
     }
-
-    http.Handle("/metrics", promhttp.Handler())
 
     log.Print("[info] cdserver started")
 

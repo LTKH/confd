@@ -5,15 +5,18 @@ import (
     "io/ioutil"
     "log"
     "net/http"
-    //"net/url"
+    "net/url"
     "time"
     "bytes"
     "regexp"
     "errors"
     "strings"
     "context"
+    "crypto/tls"
     "encoding/json"
-    "github.com/coreos/etcd/client"
+    "path/filepath"
+    //"github.com/coreos/etcd/client"
+    "go.etcd.io/etcd/client/v2"
     "github.com/xeipuuv/gojsonschema"
     "github.com/ltkh/confd/internal/config"
 )
@@ -81,15 +84,6 @@ func getEtcdNodes(nodes client.Nodes) (map[string]interface{}) {
     return jsn
 }
 
-func inArray(val string, arr []string) bool {
-    for _, v := range arr {
-        if v == val {
-            return true
-        }
-    }
-    return false
-}
-
 func parseForm(r *http.Request) (map[string]string, error) {
     result := map[string]string{
         "dir":   "",
@@ -117,75 +111,44 @@ func parseForm(r *http.Request) (map[string]string, error) {
             continue
         }
 
-        // Декодируем ключ и значение
-        //decodedKey, err := url.QueryUnescape(kv[0])
-        //if err != nil {
-        //    return nil, err
-        //}
+        // Декодируем ключ
+        decodedKey, err := url.QueryUnescape(kv[0])
+        if err != nil {
+            return nil, err
+        }
         
-        //decodedValue, err := url.QueryUnescape(kv[1])
-        //if err != nil {
-        //    return nil, err
-        //}
+        // Декодируем значение
+        decodedValue, err := url.QueryUnescape(kv[1])
+        if err != nil {
+            return nil, err
+        }
 
         // Добавляем значение в результат
-        //result[decodedKey] = decodedValue
-        result[kv[0]] = kv[1]
+        result[decodedKey] = decodedValue
 
     }
 
     return result, nil
-    
-    /*
-    var putRequest PutRequest
-    if err := json.NewDecoder(r.Body).Decode(&putRequest); err != nil {
-        log.Printf("[error] %v", err)
-        return "", "", err
-    }
-
-    log.Printf("[debug] %v", putRequest.Value)
-
-    // Читаем тело запроса
-    bodyBytes, err := ioutil.ReadAll(r.Body)
-    if err != nil {
-        return "", "", err
-    }
-    defer r.Body.Close()
-
-    percent := regexp.MustCompile(`%(25)?`)
-    bodyBytes = percent.ReplaceAllLiteral(bodyBytes, []byte("%25"))
-
-    semicolon := regexp.MustCompile(`;`)
-    bodyBytes = semicolon.ReplaceAllLiteral(bodyBytes, []byte("%3B"))
-
-    // Парсим тело как url-encoded параметры
-    params, err := url.ParseQuery(string(bodyBytes))
-    if err != nil {
-        return "", "", err
-    }
-
-    return params.Get("dir"), params.Get("value"), nil
-    */
 }
 
 func backendChecks(backend *config.Backend, params map[string]string, path, user, pass, method string) (int, error) {
-    for _, check := range backend.Checks {
-        if method != check.Method {
-            continue
+    for _, check := range backend.Checks[method] {
+        if check.Pattern != "" {
+            if matched, _ := filepath.Match(check.Pattern, path); !matched {
+                continue
+            }
         }
-        if check.Path != "" && !check.RePath.MatchString(path){
-            continue
+        if check.Path != "" {
+            if !check.RePath.MatchString(path){
+                continue
+            }
         }
         if len(check.Users) > 0 {
-            if !inArray(user, check.Users) {
-                return 403, errors.New("Access is denied")
-            }
-
-            if val, ok := backend.Users[user]; ok && val != pass {
+            if ps, ok := check.Users[user]; !ok || ps != pass {
                 return 403, errors.New("Access is denied")
             }
         }
-        if method == "PUT" || method == "POST" {
+        if method == "put" || method == "post" {
             if check.Dir == "true" && params["dir"] != "true" {
                 return 400, errors.New("Invalid parameter type: Directory expected")
             }
@@ -209,10 +172,6 @@ func backendChecks(backend *config.Backend, params map[string]string, path, user
 
                 result, err := gojsonschema.Validate(schema, document)
                 if err != nil {
-                    //if err != io.EOF {
-                    //    log.Print("[debug] EOF")
-                    //}
-                    //log.Print("[debug] test")
                     return 400, err
                 }
 
@@ -224,7 +183,7 @@ func backendChecks(backend *config.Backend, params map[string]string, path, user
             }
         }
         break
-    } 
+    }
 
     return 0, nil
 }
@@ -240,6 +199,26 @@ func GetEtcdClient(backend config.Backend, logger config.Logger) (*ApiEtcd, erro
     })
     if err != nil {
         return nil, err
+    }
+
+    if backend.Cache == true {
+        kapi := client.NewKeysAPI(readClient)
+
+        // Создаем watcher на ключ или префикс
+        watcher := kapi.Watcher("/", &client.WatcherOptions{ Recursive: true })
+
+        // Запускаем цикл получения событий
+        go func() {
+            for {
+                resp, err := watcher.Next(context.Background())
+                if err != nil {
+                    log.Println("Watcher error:", err)
+                    continue
+                }
+                log.Printf("[cache] %v: %v", resp.Action, resp.Node.Key)
+                //log.Printf("[cache] %v: %v - %v", resp.Action, resp.Node.Key, resp.Node.Value)
+            }
+        }()
     }
 
     writeClient, err := client.New(client.Config{
@@ -268,20 +247,26 @@ func GetEtcdClient(backend config.Backend, logger config.Logger) (*ApiEtcd, erro
                 MaxIdleConnsPerHost: 10,
                 IdleConnTimeout:     90 * time.Second,
                 DisableCompression:  false,
+                TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
             },
             Timeout: 10 * time.Second,
         }
 
+        actions := Actions{}
+        ticker := time.NewTicker(5 * time.Second)
+        defer ticker.Stop()
+
         for {
-            actions := Actions{}
-            for i := 0; i < len(api.Actions); i++ {
-                action := <-api.Actions
-                actions.Array = append(actions.Array, *action)
+            select {
+            case act, ok := <-api.Actions:
+                if !ok { return }
+                actions.Array = append(actions.Array, *act) 
+            case <-ticker.C:
+                if len(actions.Array) > 0 {
+                    api.SendActions(client, actions, logger.Urls)
+                    actions.Array = nil
+                }
             }
-            if len(actions.Array) > 0 {
-                api.SendActions(client, actions, logger.Urls)
-            }
-            time.Sleep(5 * time.Second)
         }
 
     }(logger)
@@ -323,10 +308,17 @@ func (a *ApiEtcd) SendActions(client *http.Client, actions Actions, urls []strin
     return
 }
 
-func (a *ApiEtcd) SetAction(action *config.Action, code int, err error) {
+func (a *ApiEtcd) SetAction(action *config.Action, method string, code int, err error) {
     if len(a.Actions) < 1000 {
-        if code != 0 { action.Attributes["code"] = code }
-        if err != nil { action.Attributes["error"] = err.Error() }
+        if method == http.MethodPut || method == http.MethodDelete {
+            action.Attributes["warnings"] = []string{"action to update a parameter"}
+        }
+        if code != 0 { 
+            action.Attributes["code"] = code 
+        }
+        if err != nil { 
+            action.Attributes["error"] = err.Error() 
+        }
         a.Actions <- action
     }
 }
@@ -360,16 +352,16 @@ func (a *ApiEtcd) ServeHTTP(w http.ResponseWriter, r *http.Request) {
         log.Printf("[error] %v (%v)", err.Error(), r.URL.Path)
         w.WriteHeader(400)
         w.Write(encodeResp(&errResp{Error:400, Message:err.Error(), Cause: path}))
-        go a.SetAction(action, 400, err)
+        //go a.SetAction(action, r.Method, 400, err)
         return
     }
 
-    code, err := backendChecks(a.Backend, params, path, user, pass, r.Method)
+    code, err := backendChecks(a.Backend, params, path, user, pass, strings.ToLower(r.Method))
     if err != nil {
         log.Printf("[error] %v (%v)", err.Error(), r.URL.Path)
         w.WriteHeader(code)
         w.Write(encodeResp(&errResp{Error:code, Message:err.Error(), Cause: path}))
-        go a.SetAction(action, code, err)
+        //go a.SetAction(action, r.Method, code, err)
         return
     }
 
@@ -390,42 +382,42 @@ func (a *ApiEtcd) ServeHTTP(w http.ResponseWriter, r *http.Request) {
             code, err := errorResp(err)
             w.WriteHeader(code)
             w.Write(encodeResp(&errResp{Error:code, Message:err.Error(), Cause: path}))
-            go a.SetAction(action, code, err)
+            //go a.SetAction(action, r.Method, code, err)
             return
         }
 
-        if r.Header.Get("X-Custom-Format") == "base" {
-            data, err := json.Marshal(resp)
+        if r.Header.Get("X-Custom-Format") == "confd" {
+            jsn := getEtcdNodes(resp.Node.Nodes)
+
+            data, err := json.Marshal(jsn)
             if err != nil {
                 log.Printf("[error] %v (%v)", err, r.URL.Path)
                 w.WriteHeader(500)
-                go a.SetAction(action, 500, err)
+                //go a.SetAction(action, r.Method, 500, err)
                 return
             }
+
+            hash := config.GetHash(data)
+            if r.Header.Get("X-Custom-Hash") == hash {
+                w.WriteHeader(204)
+                return
+            }
+
+            w.Header().Set("X-Custom-Hash", hash)
             w.Write(data)
-            go a.SetAction(action, 200, nil)
+            //go a.SetAction(action, r.Method, 200, nil)
             return
         }
 
-        jsn := getEtcdNodes(resp.Node.Nodes)
-
-        data, err := json.Marshal(jsn)
+        data, err := json.Marshal(resp)
         if err != nil {
             log.Printf("[error] %v (%v)", err, r.URL.Path)
             w.WriteHeader(500)
-            go a.SetAction(action, 500, err)
+            //go a.SetAction(action, r.Method, 500, err)
             return
         }
-
-        hash := config.GetHash(data)
-        if r.Header.Get("X-Custom-Hash") == hash {
-            w.WriteHeader(204)
-            return
-        }
-
-        w.Header().Set("X-Custom-Hash", hash)
         w.Write(data)
-        go a.SetAction(action, 200, nil)
+        //go a.SetAction(action, r.Method, 200, nil)        
         return
     }
 
@@ -444,7 +436,7 @@ func (a *ApiEtcd) ServeHTTP(w http.ResponseWriter, r *http.Request) {
             code, err := errorResp(err)
             w.WriteHeader(code)
             w.Write(encodeResp(&errResp{Error:code, Message:err.Error(), Cause: path}))
-            go a.SetAction(action, code, err)
+            //go a.SetAction(action, r.Method, code, err)
             return
         } 
 
@@ -452,12 +444,12 @@ func (a *ApiEtcd) ServeHTTP(w http.ResponseWriter, r *http.Request) {
         if err != nil {
             log.Printf("[error] %v (%v)", err, r.URL.Path)
             w.WriteHeader(500)
-            go a.SetAction(action, 500, err)
+            //go a.SetAction(action, r.Method, 500, err)
             return
         }
 
         w.Write(data)
-        go a.SetAction(action, 200, nil)
+        //go a.SetAction(action, r.Method, 200, nil)
         return
     }
 
@@ -475,7 +467,7 @@ func (a *ApiEtcd) ServeHTTP(w http.ResponseWriter, r *http.Request) {
             code, err := errorResp(err)
             w.WriteHeader(code)
             w.Write(encodeResp(&errResp{Error:code, Message:err.Error(), Cause: path}))
-            go a.SetAction(action, code, err)
+            //go a.SetAction(action, r.Method, code, err)
             return
         } 
 
@@ -483,15 +475,15 @@ func (a *ApiEtcd) ServeHTTP(w http.ResponseWriter, r *http.Request) {
         if err != nil {
             log.Printf("[error] %v (%v)", err, r.URL.Path)
             w.WriteHeader(500)
-            go a.SetAction(action, 500, err)
+            //go a.SetAction(action, r.Method, 500, err)
             return
         }
 
         w.Write(data)
-        go a.SetAction(action, 200, nil)
+        //go a.SetAction(action, r.Method, 200, nil)
         return
     }
     
     w.WriteHeader(405)
-    go a.SetAction(action, 405, nil)
+    //go a.SetAction(action, r.Method, 405, nil)
 }

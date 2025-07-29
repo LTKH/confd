@@ -8,11 +8,13 @@ global:
       password:     "test1"
 
 logger:
-  urls:             ["http://127.0.0.1:8081"]
+  urls:             []
+  #urls:             ["http://127.0.0.1:8081"]
 
 backends:
   - backend:        "etcd"
     id:             "etcd"
+    cache:          true
     nodes:          ["http://127.0.0.1:2379"]
     read:
       username:     ""
@@ -21,19 +23,21 @@ backends:
       username:     ""
       password:     ""
     checks:
-      - method:     "GET"
-        path:       ".*"
-        #users:      ["test","test1"]
-      - method:     "PUT"
-        path:       ".*"
-        regexp:     ""
-        #schema:     "file:///Users/dmitry/Documents/github/confd/config/schema.json"
-        #users:      ["test","test1"]
-      - method:     "DELETE"
-        path:       ".*"
-        regexp:     ""
-        schema:     ""
-        #users:      ["test","test1"]
+      get:
+        - path:       ".*"
+          users:      ["test","test1"]
+      put:
+        - pattern:    "*"
+          path:       ".*"
+          regexp:     ""
+          #schema:     "file:///Users/dmitry/Documents/github/confd/config/schema.json"
+          #users:      ["test","test1"]
+      delete:
+        - pattern:    "*"
+          path:       ".*"
+          regexp:     ""
+          schema:     ""
+          #users:      ["test","test1"]
 
   - backend:        "consul"
     id:             "consul"
