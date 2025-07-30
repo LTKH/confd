@@ -17,8 +17,11 @@ import (
     "encoding/json"
     "io/ioutil"
     "math/rand"
+    "crypto/aes"
+    "crypto/cipher"
     //"crypto/md5"
     //"encoding/hex"
+    "encoding/base64"
     //"github.com/gorilla/mux"
     "github.com/naoina/toml"
     "gopkg.in/natefinch/lumberjack.v2"
@@ -29,6 +32,7 @@ import (
 
 var (
     Version = "unknown"
+    KeyString string = "khuyg743878g8s2:b970m-z0"
 )
 
 type Config struct {
@@ -59,6 +63,8 @@ type HTTPTemplate struct {
     ContentEncoding  string                  `toml:"content_encoding"`
     Headers          map[string]string       `toml:"headers"`
     funcMap          map[string]interface{}
+    Username         string                  `toml:"username"`
+    Password         string                  `toml:"password"`
 }
 
 type Checks struct {
@@ -78,6 +84,35 @@ type Resp struct {
     Error            string                  `json:"error,omitempty"`
     Warnings         []string                `json:"warnings,omitempty"`
     Data             interface{}             `json:"data,omitempty"`
+}
+
+func encrypt(text string) (string, error) {
+    block, err := aes.NewCipher([]byte(KeyString))
+    if err != nil {
+        return "", err
+    }
+    plainText := []byte(text)
+    bytes := []byte{35, 46, 57, 24, 85, 35, 24, 74, 87, 35, 88, 98, 66, 32, 14, 05}
+    cfb := cipher.NewCFBEncrypter(block, bytes)
+    cipherText := make([]byte, len(plainText))
+    cfb.XORKeyStream(cipherText, plainText)
+    return base64.StdEncoding.EncodeToString(cipherText), nil
+}
+ 
+func decrypt(text string) (string, error) {
+    block, err := aes.NewCipher([]byte(KeyString))
+    if err != nil {
+        return "", err
+    }
+    cipherText, err := base64.StdEncoding.DecodeString(text)
+    if err != nil {
+        return "", err
+    }
+    bytes := []byte{35, 46, 57, 24, 85, 35, 24, 74, 87, 35, 88, 98, 66, 32, 14, 05}
+    cfb := cipher.NewCFBDecrypter(block, bytes)
+    plainText := make([]byte, len(cipherText))
+    cfb.XORKeyStream(plainText, cipherText)
+    return string(plainText), nil
 }
 
 func encodeResp(resp *Resp) []byte {
@@ -136,6 +171,8 @@ func (t *HTTPTemplate) CreateTemplate(httpClient *client.HttpClient, path, plugi
     httpConfig := client.HttpConfig{
         URLs: randURLs(t.URLs),
         ContentEncoding: t.ContentEncoding,
+        Username: t.Username,
+        Password: t.Password,
     }
 
     resp, err := httpClient.NewRequest("GET", path, t.Hash, nil, httpConfig)
@@ -257,7 +294,7 @@ func runCommand(scmd string, timeout time.Duration) ([]byte, error) {
 }
 
 // loading configuration file
-func loadConfigFile(file string) (Config, error) {
+func loadConfigFile(file string, dcrpt bool) (Config, error) {
     var cfg Config
 
     f, err := os.Open(file)
@@ -270,6 +307,16 @@ func loadConfigFile(file string) (Config, error) {
     }
 
     f.Close()
+
+    for i, tmpl := range cfg.Templates {
+        if dcrpt && tmpl.Password != "" {
+            passwd, err := decrypt(tmpl.Password)
+            if err != nil {
+                log.Fatalf("[error] %v", err)
+            }
+            cfg.Templates[i].Password = passwd
+        }
+    }
 
     return cfg, nil
 }
@@ -286,6 +333,8 @@ func main() {
     logMaxAge       := flag.Int("log.max-age", 10, "log max age")
     logCompress     := flag.Bool("log.compress", true, "log compress")
     version         := flag.Bool("version", false, "show cdagent version")
+    encryptPass     := flag.String("encrypt", "", "encrypt string")
+    decryptPass     := flag.Bool("decrypt", false, "decrypt password string")
 
     srcFile         := flag.String("src-file", "", "source file")
     srcTmpl         := flag.String("src-tmpl", "", "source template")
@@ -297,6 +346,16 @@ func main() {
     // Show version
     if *version {
         fmt.Printf("%v\n", Version)
+        return
+    }
+
+    // Encrypt
+    if *encryptPass != "" {
+        passwd, err := encrypt(*encryptPass)
+        if err != nil {
+            log.Fatalf("[error] %v", err)
+        }
+        log.Printf("[pass] %s", passwd)
         return
     }
 
@@ -340,7 +399,7 @@ func main() {
     }
 
     // loading configuration file
-    cfg, err := loadConfigFile(*cfFile)
+    cfg, err := loadConfigFile(*cfFile, *decryptPass)
     if err != nil {
         log.Fatalf("[error] reading config file: %v", err)
     }

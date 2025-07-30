@@ -14,7 +14,7 @@ logger:
 backends:
   - backend:        "etcd"
     id:             "etcd"
-    cache:          true
+    cache:          false
     nodes:          ["http://127.0.0.1:2379"]
     read:
       username:     ""

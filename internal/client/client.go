@@ -9,6 +9,7 @@ import (
     "time"
     "io/ioutil"
     "fmt"
+    "crypto/tls"
     "compress/gzip"
 )
 
@@ -20,6 +21,8 @@ type HttpConfig struct {
     URLs             []string
     Headers          map[string]string
     ContentEncoding  string
+    Username         string
+    Password         string
 }
 
 type Response struct {
@@ -35,6 +38,7 @@ func NewHttpClient(timeout time.Duration) *HttpClient {
                 MaxIdleConnsPerHost: 10,
                 IdleConnTimeout:     90 * time.Second,
                 DisableCompression:  false,
+                TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
             },
             Timeout: time.Duration(timeout) * time.Second,
         },
@@ -59,6 +63,10 @@ func (h *HttpClient) NewRequest(method, path, hash string, data []byte, cfg Http
 
         for name, value := range cfg.Headers {
             req.Header.Set(name, value)
+        }
+
+        if cfg.Username != "" && cfg.Password != "" {
+            req.SetBasicAuth(cfg.Username, cfg.Password)
         }
 
         req.Header.Set("Accept-Encoding", "gzip")

@@ -2,19 +2,12 @@
 
 [[templates]]
 urls = ["http://127.0.0.1:8083"]
-path = "/api/v2/etcd/{{ replaceAll \".ospd.net\" \"\" hostname }}/apps/test?recursive=true"
+path = "/api/v2/etcd/ps/hosts/test03/test-host149?recursive=true"
 #urls = ["http://localhost:2379/v2/keys"]
 create = true
 src = "config/inputs.tmpl"
 src_match = "config/inputs*.tmpl"
 #temp = "/tmp/.localhost.conf"
-dest = "config/localhost.conf"
-
-#[[templates]]
-#urls = ["http://127.0.0.1:8083"]
-#path = "/api/v2/etcd/{{ replaceAll \".ospd.net\" \"\" hostname }}/apps"
-#urls = ["http://localhost:2379/v2/keys"]
-#create = true
-#src = "config/test.tmpl"
-#dest = "config/test.conf"
-#interval = "10s"
+dest = "/tmp/localhost.conf"
+username = "test"
+password = "GExtqw=="

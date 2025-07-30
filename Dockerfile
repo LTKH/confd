@@ -1,4 +1,4 @@
-ARG GOLANG_IMAGE="golang:1.21.0"
+ARG GOLANG_IMAGE="golang:1.23.11"
 ARG RUNNER_IMAGE="busybox:1.37.0"
 
 FROM ${GOLANG_IMAGE} AS builder
@@ -6,6 +6,7 @@ FROM ${GOLANG_IMAGE} AS builder
 COPY . /src/
 WORKDIR /src/
 
+ENV PATH="/src/go/bin:$PATH"
 RUN go build -o /bin/cdserver cmd/cdserver/cdserver.go
 
 FROM ${RUNNER_IMAGE}
