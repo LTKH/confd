@@ -13,6 +13,7 @@ import (
     "strings"
     "context"
     "crypto/tls"
+    "crypto/x509"
     "encoding/json"
     "path/filepath"
     //"github.com/coreos/etcd/client"
@@ -190,11 +191,42 @@ func backendChecks(backend *config.Backend, params map[string]string, path, user
 
 func GetEtcdClient(backend config.Backend, logger config.Logger) (*ApiEtcd, error) {
 
+    // DefaultTransport
+    transport := client.DefaultTransport
+
+    if backend.UseSSL {
+        caCertPool := x509.NewCertPool()
+
+        // Читаем CA сертификат
+        if backend.TrustedCaFile != "" {
+            caCert, err := ioutil.ReadFile(backend.TrustedCaFile)
+            if err != nil {
+                return nil, err
+            }
+            caCertPool.AppendCertsFromPEM(caCert)
+        }
+
+        // Читаем клиентский сертификат и ключ
+        cert, err := tls.LoadX509KeyPair(backend.CertFile, backend.CertKey)
+        if err != nil {
+            return nil, err
+        }
+
+        // Настраиваем TLS
+        tlsConfig := &tls.Config{
+            RootCAs:      caCertPool,
+            Certificates: []tls.Certificate{cert},
+        }
+
+        transport = &http.Transport{TLSClientConfig: tlsConfig}
+    }
+
+    // Конфигурация клиента
     readClient, err := client.New(client.Config{
         Endpoints:               backend.Nodes,
         Username:                backend.Read.Username,
         Password:                backend.Read.Password,
-        Transport:               client.DefaultTransport,
+        Transport:               transport,
         HeaderTimeoutPerRequest: 5 * time.Second,
     })
     if err != nil {
@@ -225,7 +257,7 @@ func GetEtcdClient(backend config.Backend, logger config.Logger) (*ApiEtcd, erro
         Endpoints:               backend.Nodes,
         Username:                backend.Write.Username,
         Password:                backend.Write.Password,
-        Transport:               client.DefaultTransport,
+        Transport:               transport,
         HeaderTimeoutPerRequest: 5 * time.Second,
     })
     if err != nil {

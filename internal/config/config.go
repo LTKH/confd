@@ -12,66 +12,70 @@ import (
 )
 
 type Config struct {
-    Global           Global                  `yaml:"global"`
-    Logger           Logger                  `yaml:"logger"`
-    Backends         []Backend               `yaml:"backends"`
+    Global         Global                  `yaml:"global"`
+    Logger         Logger                  `yaml:"logger"`
+    Backends       []Backend               `yaml:"backends"`
 }
 
 type Global struct {
-    CertFile         string                  `yaml:"cert_file"`
-    CertKey          string                  `yaml:"cert_key"`
-    Users            GlobUsers               `yaml:"users"`
+    CertFile       string                  `yaml:"cert_file"`
+    CertKey        string                  `yaml:"cert_key"`
+    Users          GlobUsers               `yaml:"users"`
 }
 
 type GlobUsers map[string]string
 
 type Logger struct {
-    Urls             []string                `yaml:"urls"`
-    //Methods          []string                `yaml:"methods"`
+    Urls           []string                `yaml:"urls"`
+    //Methods        []string                `yaml:"methods"`
 }
 
 type Backend struct {
-    Backend          string                  `yaml:"backend"`
-    Id               string                  `yaml:"id"`
-    Nodes            []string                `yaml:"nodes"`
-    Write            Attributes              `yaml:"write"`
-    Read             Attributes              `yaml:"read"`
-    Checks           map[string][]*Scheme    `yaml:"checks"`
-    //Users            map[string]string        
-    Cache            bool                    `yaml:"cache"`   
+    Backend        string                  `yaml:"backend"`
+    Id             string                  `yaml:"id"`
+    Nodes          []string                `yaml:"nodes"`
+    Write          Attributes              `yaml:"write"`
+    Read           Attributes              `yaml:"read"`
+    Checks         map[string][]*Scheme    `yaml:"checks"`
+    //Users          map[string]string        
+    Cache          bool                    `yaml:"cache"`   
+    CertFile       string                  `yaml:"cert_file"` 
+    CertKey        string                  `yaml:"cert_key"` 
+    TrustedCaFile  string                  `yaml:"trusted_ca_file"`
+    UseSSL         bool                    `yaml:"use_ssl"`
 }
 
 type Scheme struct {
-    //Method           string                  `yaml:"method"`
-    Pattern          string                  `yaml:"pattern"`
-    Path             string                  `yaml:"path"`
-    RePath           *regexp.Regexp
-    Regexp           string                  `yaml:"regexp"`
-    ReRegexp         *regexp.Regexp
-    Schema           string                  `yaml:"schema"`
-    Users            Users                   `yaml:"users"`
-    Dir              string                  `yaml:"dir"`
+    //Method         string                  `yaml:"method"`
+    Pattern        string                  `yaml:"pattern"`
+    Path           string                  `yaml:"path"`
+    RePath         *regexp.Regexp
+    Regexp         string                  `yaml:"regexp"`
+    ReRegexp       *regexp.Regexp
+    Schema         string                  `yaml:"schema"`
+    Users          Users                   `yaml:"users"`
+    Dir            string                  `yaml:"dir"`
 }
 
 type Users map[string]string
 
 type Attributes struct {
-    Username         string                  `yaml:"username"`
-    Password         string                  `yaml:"password"`
+    Username       string                  `yaml:"username"`
+    Password       string                  `yaml:"password"`
 }
 
 type UserInfo struct {
-    Username         string                  `yaml:"username"`
-    Password         string                  `yaml:"password"`
+    Username       string                  `yaml:"username"`
+    Password       string                  `yaml:"password"`
 }
 
 type Action struct {
-    Login            string                  `json:"login"`
-    Action           string                  `json:"action"`
-    Object           string                  `json:"object"`
-    Attributes       map[string]interface{}  `json:"attributes"`
-    Description      string                  `json:"description"`
-    Timestamp        int64                   `json:"timestamp"`
+    Login          string                  `json:"login"`
+    Action         string                  `json:"action"`
+    Object         string                  `json:"object"`
+    Attributes     map[string]interface{}  `json:"attributes"`
+    Description    string                  `json:"description"`
+    Timestamp      int64                   `json:"timestamp"`
 }
 
 func getEnv(value string) string {

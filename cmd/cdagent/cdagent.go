@@ -14,13 +14,13 @@ import (
     "runtime"
     "os/exec"
     "context"
-    "encoding/json"
     "io/ioutil"
     "math/rand"
     "crypto/aes"
     "crypto/cipher"
     //"crypto/md5"
     //"encoding/hex"
+    "encoding/json"
     "encoding/base64"
     //"github.com/gorilla/mux"
     "github.com/naoina/toml"
@@ -31,8 +31,8 @@ import (
 )
 
 var (
-    Version = "unknown"
-    KeyString string = "khuyg743878g8s2:b970m-z0"
+    Version      = "unknown"
+    KeyString    = "khuyg743878g8s2:b970m-z0"
 )
 
 type Config struct {
@@ -322,6 +322,9 @@ func loadConfigFile(file string, dcrpt bool) (Config, error) {
 }
 
 func main() {
+
+    // Limits the number of operating system threads
+    runtime.GOMAXPROCS(runtime.NumCPU())
 
     // Command-line flag parsing
     cfFile          := flag.String("config.file", "config/confd.toml", "config file")
