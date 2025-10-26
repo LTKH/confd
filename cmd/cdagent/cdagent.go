@@ -197,6 +197,11 @@ func (t *HTTPTemplate) CreateTemplate(httpClient *client.HttpClient, path, plugi
         return nil
     }
 
+    if resp.StatusCode == 403 {
+        err := fmt.Errorf("when request to [%s] received status code: 403", path)
+        return err
+    }
+
     if resp.StatusCode != 200 {
         return nil
     }
@@ -205,7 +210,6 @@ func (t *HTTPTemplate) CreateTemplate(httpClient *client.HttpClient, path, plugi
 
     var jsn interface{}
     if err := json.Unmarshal(resp.Body, &jsn); err != nil {
-        log.Printf("[error] %v", err)
         if plugin == "telegraf" || plugin == "windows" {    
             fmt.Printf("confd,src=%s,dest=%s success=%d\n", t.Src, t.Dest, 1)
         }
@@ -214,7 +218,6 @@ func (t *HTTPTemplate) CreateTemplate(httpClient *client.HttpClient, path, plugi
 
     succ, err := t.CreateConf(jsn)
     if err != nil {
-        log.Printf("[error] %v", err)
         if plugin == "telegraf" || plugin == "windows" {    
             fmt.Printf("confd,src=%s,dest=%s success=%d\n", t.Src, t.Dest, succ)
         }
@@ -225,7 +228,6 @@ func (t *HTTPTemplate) CreateTemplate(httpClient *client.HttpClient, path, plugi
         if t.CheckCmd != "" {
             _, err := runCommand(t.CheckCmd, 10)
             if err != nil {
-                log.Printf("[error] %v", err)
                 if plugin == "telegraf" || plugin == "windows" {
                     fmt.Printf("confd,src=%s,dest=%s success=%d\n", t.Src, t.Dest, 3)
                 }
@@ -236,7 +238,6 @@ func (t *HTTPTemplate) CreateTemplate(httpClient *client.HttpClient, path, plugi
         if t.Temp != t.Dest {
             err := os.Rename(t.Temp, t.Dest)
             if err != nil {
-                log.Printf("[error] %v", err)
                 if plugin == "telegraf" || plugin == "windows" {
                     fmt.Printf("confd,src=%s,dest=%s success=%d\n", t.Src, t.Dest, 3)
                 }
