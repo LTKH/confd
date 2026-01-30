@@ -184,27 +184,27 @@ func requestHttpFunc(method string, url string, data string, headers map[string]
 // replaceAll replaces all occurrences of a value in a string with the given
 // replacement value.
 func replaceAll(f, t, s string) (string, error) {
-	return strings.Replace(s, f, t, -1), nil
+    return strings.Replace(s, f, t, -1), nil
 }
 
 // regexReplaceAll replaces all occurrences of a regular expression with
 // the given replacement value.
 func regexReplaceAll(re, pl, s string) (string, error) {
-	compiled, err := regexp.Compile(re)
-	if err != nil {
-		return "", err
-	}
-	return compiled.ReplaceAllString(s, pl), nil
+    compiled, err := regexp.Compile(re)
+    if err != nil {
+        return "", err
+    }
+    return compiled.ReplaceAllString(s, pl), nil
 }
 
 // regexMatch returns true or false if the string matches
 // the given regular expression
 func regexMatch(re, s string) (bool, error) {
-	compiled, err := regexp.Compile(re)
-	if err != nil {
-		return false, err
-	}
-	return compiled.MatchString(s), nil
+    compiled, err := regexp.Compile(re)
+    if err != nil {
+        return false, err
+    }
+    return compiled.MatchString(s), nil
 }
 
 // join is a version of strings.Join that can be piped
@@ -213,42 +213,42 @@ func join(sep string, a []interface{}) (string, error) {
     for _, v := range a {
         arr = append(arr, v.(string))
     }
-	return strings.Join(arr, sep), nil
+    return strings.Join(arr, sep), nil
 }
 
 func lookupIP(data string) []string {
-	ips, err := net.LookupIP(data)
-	if err != nil {
-		return nil
-	}
-	// "Cast" IPs into strings and sort the array
-	ipStrings := make([]string, len(ips))
+    ips, err := net.LookupIP(data)
+    if err != nil {
+        return nil
+    }
+    // "Cast" IPs into strings and sort the array
+    ipStrings := make([]string, len(ips))
 
-	for i, ip := range ips {
-		ipStrings[i] = ip.String()
-	}
-	sort.Strings(ipStrings)
-	return ipStrings
+    for i, ip := range ips {
+        ipStrings[i] = ip.String()
+    }
+    sort.Strings(ipStrings)
+    return ipStrings
 }
 
 func lookupIPV6(data string) []string {
-	var addresses []string
-	for _, ip := range lookupIP(data) {
-		if strings.Contains(ip, ":") {
-			addresses = append(addresses, ip)
-		}
-	}
-	return addresses
+    var addresses []string
+    for _, ip := range lookupIP(data) {
+        if strings.Contains(ip, ":") {
+            addresses = append(addresses, ip)
+        }
+    }
+    return addresses
 }
 
 func lookupIPV4(data string) []string {
-	var addresses []string
-	for _, ip := range lookupIP(data) {
-		if strings.Contains(ip, ".") {
-			addresses = append(addresses, ip)
-		}
-	}
-	return addresses
+    var addresses []string
+    for _, ip := range lookupIP(data) {
+        if strings.Contains(ip, ".") {
+            addresses = append(addresses, ip)
+        }
+    }
+    return addresses
 }
 
 func fileExist(f string) bool {
@@ -261,9 +261,9 @@ func fileExist(f string) bool {
 
 func hostname() (string, error) {
     hostname, err := os.Hostname()
-	if err != nil {
-		return "", err
-	}
+    if err != nil {
+        return "", err
+    }
 
     return hostname, nil
 }
@@ -286,4 +286,22 @@ func fromJsonArray(data string) ([]interface{}, error) {
     }
     
     return result, nil
+}
+
+func coalesce(args ...interface{}) interface{} {
+    for _, arg := range args {
+        // Простая проверка на nil/пустоту
+        if arg != nil && arg != "" && arg != 0 && arg != false {
+            return arg
+        }
+    }
+    return nil
+}
+
+func concat[T any](slices ...[]T) []T {
+    var result []T
+    for _, s := range slices {
+        result = append(result, s...)
+    }
+    return result
 }

@@ -1,0 +1,4 @@
+{
+    "Listen": ":6850",
+    "EtcdURL": "http://localhost:2379"
+}

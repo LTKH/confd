@@ -57,6 +57,9 @@ func (h *HttpClient) NewRequest(method, path, hash string, data []byte, cfg Http
             log.Printf("[error] %v", err)
             continue
         }
+        if method == "GET"{
+            req.Header.Set("X-Custom-Format", "confd")
+        }
         if method == "PUT"{
             req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
         }

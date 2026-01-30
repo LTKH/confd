@@ -24,8 +24,14 @@ backends:
       password:     ""
     checks:
       get:
-        - path:       ".*"
-          users:      ["test","test1"]
+        - path:       "^/$"
+          users:      ["test1"]
+        - path:       "^(/ps|/ps/hosts|/ps/hosts/test04)$"
+          users:      ["test1"]
+        - path:       "^/ps/hosts/test04/test-host342$"
+          users:      ["test1"]
+        - path:       "^/ps/hosts/test04/test-host342.*"
+          users:      ["test1"]
       put:
         - pattern:    "*"
           path:       ".*"

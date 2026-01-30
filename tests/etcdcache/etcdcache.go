@@ -31,19 +31,13 @@ var (
             TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
         },
     }
-    KeyString string = "abc&1*~#^2^#s0^=)^^7%b34"
+    KeyString string = "..."
 )
  
 type Error struct {
     Cause          string       `json:"cause"`
     Message        string       `json:"message"`
     ErrorCode      int          `json:"errorCode"`
-}
- 
-type Cache struct {
-    sync.RWMutex
-    host           string
-    keys           map[string]*Node
 }
  
 type Search struct {

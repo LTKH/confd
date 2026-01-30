@@ -60,6 +60,8 @@ func New(name string) *Template {
         "hostname":        hostname,
         "fromJson":        fromJson,
         "fromJsonArray":   fromJsonArray,
+        "coalesce":        coalesce,
+        "concat":          concat[any],
     }
 
     t.name = filepath.Base(name)

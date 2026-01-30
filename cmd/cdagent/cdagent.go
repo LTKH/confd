@@ -51,6 +51,7 @@ type HTTPTemplate struct {
     URLs             []string                `toml:"urls"`
     Path             string                  `toml:"path"`
     Hash             string                  `toml:"-"`
+    Modified         bool                    `toml:"modified"`
     Create           bool                    `toml:"create"`
     Src              string                  `toml:"src"`
     SrcMatch         string                  `toml:"src_match"`
@@ -206,7 +207,9 @@ func (t *HTTPTemplate) CreateTemplate(httpClient *client.HttpClient, path, plugi
         return nil
     }
 
-    t.Hash = config.GetHash(resp.Body)
+    if t.Modified {
+        t.Hash = config.GetHash(resp.Body)
+    }
 
     var jsn interface{}
     if err := json.Unmarshal(resp.Body, &jsn); err != nil {
@@ -488,6 +491,9 @@ func main() {
 
     // Daemon mode
     for (run) {
+        if *plugin == "telegraf" || *plugin == "windows" {
+            fmt.Printf("confd,version=%s run=%d\n", Version, 1)
+        }
         if *plugin == "telegraf" {
             run = false
         }

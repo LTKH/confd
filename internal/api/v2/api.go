@@ -57,6 +57,46 @@ func encodeResp(resp *errResp) []byte {
     return jsn
 }
 
+func getAllowedNodes(nodes client.Nodes, checks []*config.Scheme, user, pass string) client.Nodes {
+    var nnodes client.Nodes
+    for _, node := range nodes {
+
+        allowed := false
+        for _, check := range checks {
+            if len(check.Users) > 0 {
+                if ps, ok := check.Users[user]; !ok || ps != pass {
+                    continue
+                }
+            }
+            if check.Path != "" {
+                if !check.RePath.MatchString(node.Key){
+                    continue
+                }
+            }
+            if check.Pattern != "" {
+                if matched, _ := filepath.Match(check.Pattern, node.Key); !matched {
+                    continue
+                }
+            }
+            allowed = true
+            //log.Printf("path: %v, users: %v, user: %v, pass: %v", check.Path, check.Users, user, pass)
+            //log.Printf("node: %v", node.Key)
+            break
+        }
+
+        if allowed {
+            node.Nodes = getAllowedNodes(node.Nodes, checks, user, pass)
+            nnodes = append(nnodes, node)
+        }
+    }
+
+    //if len(nnodes) == 0 {
+    //    return make(client.Nodes, 0)
+    //}
+
+    return nnodes
+}
+
 func getEtcdNodes(nodes client.Nodes) (map[string]interface{}) {
     jsn := map[string]interface{}{}
 
@@ -134,9 +174,9 @@ func parseForm(r *http.Request) (map[string]string, error) {
 
 func backendChecks(backend *config.Backend, params map[string]string, path, user, pass, method string) (int, error) {
     for _, check := range backend.Checks[method] {
-        if check.Pattern != "" {
-            if matched, _ := filepath.Match(check.Pattern, path); !matched {
-                continue
+        if len(check.Users) > 0 {
+            if ps, ok := check.Users[user]; !ok || ps != pass {
+                return 403, errors.New("Access is denied")
             }
         }
         if check.Path != "" {
@@ -144,9 +184,9 @@ func backendChecks(backend *config.Backend, params map[string]string, path, user
                 continue
             }
         }
-        if len(check.Users) > 0 {
-            if ps, ok := check.Users[user]; !ok || ps != pass {
-                return 403, errors.New("Access is denied")
+        if check.Pattern != "" {
+            if matched, _ := filepath.Match(check.Pattern, path); !matched {
+                continue
             }
         }
         if method == "put" || method == "post" {
@@ -239,12 +279,18 @@ func GetEtcdClient(backend config.Backend, logger config.Logger) (*ApiEtcd, erro
         // Создаем watcher на ключ или префикс
         watcher := kapi.Watcher("/", &client.WatcherOptions{ Recursive: true })
 
+        // Считываем все данные
+        // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
         // Запускаем цикл получения событий
         go func() {
             for {
                 resp, err := watcher.Next(context.Background())
                 if err != nil {
-                    log.Println("Watcher error:", err)
+                    log.Printf("watcher error: %v", err)
+                    time.Sleep(10 * time.Second)
+                    // Считываем все данные
+                    // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
                     continue
                 }
                 log.Printf("[cache] %v: %v", resp.Action, resp.Node.Key)
@@ -416,6 +462,10 @@ func (a *ApiEtcd) ServeHTTP(w http.ResponseWriter, r *http.Request) {
             w.Write(encodeResp(&errResp{Error:code, Message:err.Error(), Cause: path}))
             //go a.SetAction(action, r.Method, code, err)
             return
+        }
+
+        if opts.Recursive == true {
+            resp.Node.Nodes = getAllowedNodes(resp.Node.Nodes, a.Backend.Checks["get"], user, pass)
         }
 
         if r.Header.Get("X-Custom-Format") == "confd" {

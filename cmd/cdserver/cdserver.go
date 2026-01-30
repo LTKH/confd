@@ -1,6 +1,8 @@
 package main
 
 import (
+    "net"
+    "net/url"
     "net/http"
     _ "net/http/pprof"
     "flag"
@@ -9,17 +11,92 @@ import (
     "os"
     "os/signal"
     "syscall"
+    "sync"
+    "sort"
+    "time"
     //"strings"
     "gopkg.in/natefinch/lumberjack.v2"
     "github.com/prometheus/client_golang/prometheus/promhttp"
     "github.com/ltkh/confd/internal/api/v1"
-	"github.com/ltkh/confd/internal/api/v2"
+    "github.com/ltkh/confd/internal/api/v2"
     "github.com/ltkh/confd/internal/config"
 )
 
 var (
     Version = "unknown"
 )
+
+type Result struct {
+    Address string
+    Latency time.Duration
+    Error   error
+}
+
+func checkAddr(name, addr string, timeout time.Duration, wg *sync.WaitGroup, results chan<- Result) {
+    defer wg.Done()
+
+    start := time.Now()
+    conn, err := net.DialTimeout("tcp", addr, timeout)
+    duration := time.Since(start)
+
+    if err == nil {
+        conn.Close()
+    }
+
+    results <- Result{
+        Address: name,
+        Latency: duration,
+        Error:   err,
+    }
+}
+
+func checkServers(servers []string) ([]string, error) {
+    resultsChan := make(chan Result, len(servers))
+    var wg sync.WaitGroup
+
+    // Запускаем проверки параллельно
+    for _, addr := range servers {
+        u, err := url.Parse(addr)
+        if err != nil {
+            return []string{}, err
+        }
+
+        wg.Add(1)
+        go checkAddr(addr, u.Host, 5 * time.Second, &wg, resultsChan)
+    }
+
+    // Ждем завершения и закрываем канал
+    wg.Wait()
+    close(resultsChan)
+
+    // Собираем результаты в слайс
+    var resultsStruct []Result
+    for res := range resultsChan {
+        resultsStruct = append(resultsStruct, res)
+    }
+
+    // Сортируем: сначала рабочие по времени, затем — упавшие
+    sort.Slice(resultsStruct, func(i, j int) bool {
+        // 1. Если у i ошибка, а у j нет — i должен быть в конце (возвращаем false)
+        if resultsStruct[i].Error != nil && resultsStruct[j].Error == nil {
+            return false
+        }
+        // 2. Если у j ошибка, а у i нет — i должен быть в начале (возвращаем true)
+        if resultsStruct[i].Error == nil && resultsStruct[j].Error != nil {
+            return true
+        }
+        // 3. Если оба либо с ошибками, либо оба ОК — сортируем по времени
+        return resultsStruct[i].Latency < resultsStruct[j].Latency
+    })
+
+    var results []string
+    for i, res := range resultsStruct {
+        log.Printf("[info] latency %v: %v (%v), err: %v", i, res.Address, res.Latency, res.Error)
+        results = append(results, res.Address)
+    }
+
+    return results, nil
+}
 
 func main() {
 
@@ -40,7 +117,7 @@ func main() {
         return
     }
 
-	// Program completion signal processing
+    // Program completion signal processing
     c := make(chan os.Signal, 2)
     signal.Notify(c, os.Interrupt, syscall.SIGTERM)
     go func() {
@@ -55,7 +132,7 @@ func main() {
         log.Fatalf("[error] loading configuration file: %v", err)
     }
 
-	// Logging settings
+    // Logging settings
     if *lgFile != "" {
         log.SetOutput(&lumberjack.Logger{
             Filename:   *lgFile,
@@ -74,6 +151,13 @@ func main() {
     http.Handle("/metrics", promhttp.Handler())
 
     for _, back := range cfg.Backends {
+
+        log.Printf("[info] latency check for \"%v\"", back.Id)
+        nodes, err := checkServers(back.Nodes)
+        if err != nil {
+            log.Fatalf("[error] %v", err)
+        }
+        back.Nodes = nodes
 
         if back.Backend == "etcd" {
             etcdClient, err := v2.GetEtcdClient(back, cfg.Logger)
