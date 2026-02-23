@@ -90,8 +90,8 @@ func checkServers(servers []string) ([]string, error) {
     })
 
     var results []string
-    for i, res := range resultsStruct {
-        log.Printf("[info] latency %v: %v (%v), err: %v", i, res.Address, res.Latency, res.Error)
+    for _, res := range resultsStruct {
+        //log.Printf("[info] latency %v: %v (%v), err: %v", i, res.Address, res.Latency, res.Error)
         results = append(results, res.Address)
     }
 
@@ -152,7 +152,7 @@ func main() {
 
     for _, back := range cfg.Backends {
 
-        log.Printf("[info] latency check for \"%v\"", back.Id)
+        //log.Printf("[info] latency check for \"%v\"", back.Id)
         nodes, err := checkServers(back.Nodes)
         if err != nil {
             log.Fatalf("[error] %v", err)

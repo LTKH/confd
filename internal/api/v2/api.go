@@ -63,11 +63,6 @@ func getAllowedNodes(nodes client.Nodes, checks []*config.Scheme, user, pass str
 
         allowed := false
         for _, check := range checks {
-            if len(check.Users) > 0 {
-                if ps, ok := check.Users[user]; !ok || ps != pass {
-                    continue
-                }
-            }
             if check.Path != "" {
                 if !check.RePath.MatchString(node.Key){
                     continue
@@ -78,6 +73,12 @@ func getAllowedNodes(nodes client.Nodes, checks []*config.Scheme, user, pass str
                     continue
                 }
             }
+            if len(check.Users) > 0 {
+                if ps, ok := check.Users[user]; !ok || ps != pass {
+                    continue
+                }
+            }
+            
             allowed = true
             //log.Printf("path: %v, users: %v, user: %v, pass: %v", check.Path, check.Users, user, pass)
             //log.Printf("node: %v", node.Key)
@@ -174,11 +175,6 @@ func parseForm(r *http.Request) (map[string]string, error) {
 
 func backendChecks(backend *config.Backend, params map[string]string, path, user, pass, method string) (int, error) {
     for _, check := range backend.Checks[method] {
-        if len(check.Users) > 0 {
-            if ps, ok := check.Users[user]; !ok || ps != pass {
-                return 403, errors.New("Access is denied")
-            }
-        }
         if check.Path != "" {
             if !check.RePath.MatchString(path){
                 continue
@@ -189,6 +185,12 @@ func backendChecks(backend *config.Backend, params map[string]string, path, user
                 continue
             }
         }
+        if len(check.Users) > 0 {
+            if ps, ok := check.Users[user]; !ok || ps != pass {
+                return 403, errors.New("Access is denied")
+            }
+        }
+        
         if method == "put" || method == "post" {
             if check.Dir == "true" && params["dir"] != "true" {
                 return 400, errors.New("Invalid parameter type: Directory expected")
@@ -445,8 +447,6 @@ func (a *ApiEtcd) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
     if r.Method == http.MethodGet {
 
-        kapi := client.NewKeysAPI(*a.ReadClient)
-        
         opts := &client.GetOptions{}
         if r.URL.Query().Get("recursive") == "true" {
             opts.Recursive = true
@@ -455,18 +455,31 @@ func (a *ApiEtcd) ServeHTTP(w http.ResponseWriter, r *http.Request) {
             opts.Sort = true
         }
 
-        resp, err := kapi.Get(context.Background(), path, opts)
-        if err != nil {
-            code, err := errorResp(err)
-            w.WriteHeader(code)
-            w.Write(encodeResp(&errResp{Error:code, Message:err.Error(), Cause: path}))
-            //go a.SetAction(action, r.Method, code, err)
-            return
+        kapi := client.NewKeysAPI(*a.ReadClient)
+        resp := &client.Response{}
+        if r.URL.Query().Get("wait") == "true" {
+            // Создаем watcher на ключ или префикс
+            watcher := kapi.Watcher(path, &client.WatcherOptions{ Recursive: opts.Recursive })
+            resp, err = watcher.Next(context.Background())
+            if err != nil {
+                log.Printf("watcher error: %v", err)
+                w.WriteHeader(500)
+                w.Write(encodeResp(&errResp{Error:500, Message:err.Error(), Cause: path}))
+                //go a.SetAction(action, r.Method, 500, err)
+                return
+            }
+        } else {
+            resp, err = kapi.Get(context.Background(), path, opts)
+            if err != nil {
+                code, err := errorResp(err)
+                w.WriteHeader(code)
+                w.Write(encodeResp(&errResp{Error:code, Message:err.Error(), Cause: path}))
+                //go a.SetAction(action, r.Method, code, err)
+                return
+            }
         }
 
-        if opts.Recursive == true {
-            resp.Node.Nodes = getAllowedNodes(resp.Node.Nodes, a.Backend.Checks["get"], user, pass)
-        }
+        resp.Node.Nodes = getAllowedNodes(resp.Node.Nodes, a.Backend.Checks["get"], user, pass)
 
         if r.Header.Get("X-Custom-Format") == "confd" {
             jsn := getEtcdNodes(resp.Node.Nodes)
