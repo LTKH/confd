@@ -49,6 +49,20 @@ type Actions struct {
     Array         []config.Action          `json:"actions"`
 }
 
+func getIPAddress(r *http.Request) string {
+    IPAddress := r.Header.Get("X-Real-Ip")
+    if IPAddress == "" {
+        IPAddress = r.Header.Get("X-Forwarded-For")
+    } 
+    if IPAddress == "" {
+        IPAddress = r.RemoteAddr
+    }
+    if IPAddress == "" { 
+        IPAddress = "unknown" 
+    }
+    return IPAddress
+}
+
 func encodeResp(resp *errResp) []byte {
     jsn, err := json.Marshal(resp)
     if err != nil {
@@ -74,7 +88,7 @@ func getAllowedNodes(nodes client.Nodes, checks []*config.Scheme, user, pass str
                 }
             }
             if len(check.Users) > 0 {
-                if ps, ok := check.Users[user]; !ok || ps != pass {
+                if ps, ok := check.Users[user]; !ok || ps.Password != pass {
                     continue
                 }
             }
@@ -175,6 +189,8 @@ func parseForm(r *http.Request) (map[string]string, error) {
 
 func backendChecks(backend *config.Backend, params map[string]string, path, user, pass, method string) (int, error) {
     for _, check := range backend.Checks[method] {
+        err_code := 400;
+
         if check.Path != "" {
             if !check.RePath.MatchString(path){
                 continue
@@ -186,26 +202,30 @@ func backendChecks(backend *config.Backend, params map[string]string, path, user
             }
         }
         if len(check.Users) > 0 {
-            if ps, ok := check.Users[user]; !ok || ps != pass {
+            usr, ok := check.Users[user]
+            if !ok || usr.Password != pass {
                 return 403, errors.New("Access is denied")
+            }
+            if usr.ErrCode != 0 {
+                err_code = usr.ErrCode
             }
         }
         
         if method == "put" || method == "post" {
             if check.Dir == "true" && params["dir"] != "true" {
-                return 400, errors.New("Invalid parameter type: Directory expected")
+                return err_code, errors.New("Invalid parameter type: Directory expected")
             }
 
             if check.Dir == "false" && params["dir"] == "true" {
-                return 400, errors.New("Invalid parameter type: Not directory expected")
+                return err_code, errors.New("Invalid parameter type: Not directory expected")
             }
 
             if check.Regexp != "" {
                 if params["dir"] != "true" && !check.ReRegexp.MatchString(params["value"]){
-                    return 400, errors.New("Invalid parameter value")
+                    return err_code, errors.New("Invalid parameter value")
                 }
                 if params["dir"] == "true" && !check.ReRegexp.MatchString(params["dir"]){
-                    return 400, errors.New("Invalid parameter name")
+                    return err_code, errors.New("Invalid parameter name")
                 }
             }
 
@@ -215,12 +235,12 @@ func backendChecks(backend *config.Backend, params map[string]string, path, user
 
                 result, err := gojsonschema.Validate(schema, document)
                 if err != nil {
-                    return 400, err
+                    return err_code, err
                 }
 
                 if !result.Valid() {
                     for _, desc := range result.Errors() {
-                        return 400, errors.New(desc.String())
+                        return err_code, errors.New(desc.String())
                     }
                 }
             }
@@ -289,7 +309,7 @@ func GetEtcdClient(backend config.Backend, logger config.Logger) (*ApiEtcd, erro
             for {
                 resp, err := watcher.Next(context.Background())
                 if err != nil {
-                    log.Printf("watcher error: %v", err)
+                    log.Printf("[error] watcher error: %v", err)
                     time.Sleep(10 * time.Second)
                     // Считываем все данные
                     // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
@@ -355,7 +375,7 @@ func GetEtcdClient(backend config.Backend, logger config.Logger) (*ApiEtcd, erro
 }
 
 func errorResp(err error) (int, error) {
-    log.Printf("[error] %v", err.Error())
+    //log.Printf("[error] %v", err.Error())
 
     if strings.Contains(err.Error(), "connect: connection refused") {
         return 502, errors.New("Etcd cluster is unavailable")
@@ -429,7 +449,7 @@ func (a *ApiEtcd) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
     params, err := parseForm(r)
     if err != nil {
-        log.Printf("[error] %v (%v)", err.Error(), r.URL.Path)
+        log.Printf("[error] %v - %v \"%v %v\" %v %v", getIPAddress(r), user, r.Method, r.URL.Path, 400, err.Error())
         w.WriteHeader(400)
         w.Write(encodeResp(&errResp{Error:400, Message:err.Error(), Cause: path}))
         //go a.SetAction(action, r.Method, 400, err)
@@ -438,7 +458,8 @@ func (a *ApiEtcd) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
     code, err := backendChecks(a.Backend, params, path, user, pass, strings.ToLower(r.Method))
     if err != nil {
-        log.Printf("[error] %v (%v)", err.Error(), r.URL.Path)
+        if user == "" { user = "-" }
+        log.Printf("[error] %v - %v \"%v %v\" %v %v", getIPAddress(r), user, r.Method, r.URL.Path, code, err.Error())
         w.WriteHeader(code)
         w.Write(encodeResp(&errResp{Error:code, Message:err.Error(), Cause: path}))
         //go a.SetAction(action, r.Method, code, err)
@@ -447,22 +468,24 @@ func (a *ApiEtcd) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
     if r.Method == http.MethodGet {
 
+        kapi := client.NewKeysAPI(*a.ReadClient)
+        resp := &client.Response{}
+
         opts := &client.GetOptions{}
-        if r.URL.Query().Get("recursive") == "true" {
+        if strings.ToLower(r.URL.Query().Get("recursive")) == "true" {
             opts.Recursive = true
         }
-        if r.URL.Query().Get("sorted") == "true" {
+        if strings.ToLower(r.URL.Query().Get("sorted")) == "true" {
             opts.Sort = true
         }
 
-        kapi := client.NewKeysAPI(*a.ReadClient)
-        resp := &client.Response{}
-        if r.URL.Query().Get("wait") == "true" {
+        if strings.ToLower(r.URL.Query().Get("wait")) == "true" {
             // Создаем watcher на ключ или префикс
             watcher := kapi.Watcher(path, &client.WatcherOptions{ Recursive: opts.Recursive })
             resp, err = watcher.Next(context.Background())
             if err != nil {
-                log.Printf("watcher error: %v", err)
+                if user == "" { user = "-" }
+                log.Printf("[error] %v - %v \"%v %v\" %v %v", getIPAddress(r), user, r.Method, r.URL.Path, 500, err.Error())
                 w.WriteHeader(500)
                 w.Write(encodeResp(&errResp{Error:500, Message:err.Error(), Cause: path}))
                 //go a.SetAction(action, r.Method, 500, err)
@@ -472,6 +495,8 @@ func (a *ApiEtcd) ServeHTTP(w http.ResponseWriter, r *http.Request) {
             resp, err = kapi.Get(context.Background(), path, opts)
             if err != nil {
                 code, err := errorResp(err)
+                if user == "" { user = "-" }
+                log.Printf("[error] %v - %v \"%v %v\" %v %v", getIPAddress(r), user, r.Method, r.URL.Path, code, err.Error())
                 w.WriteHeader(code)
                 w.Write(encodeResp(&errResp{Error:code, Message:err.Error(), Cause: path}))
                 //go a.SetAction(action, r.Method, code, err)
@@ -486,7 +511,8 @@ func (a *ApiEtcd) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
             data, err := json.Marshal(jsn)
             if err != nil {
-                log.Printf("[error] %v (%v)", err, r.URL.Path)
+                if user == "" { user = "-" }
+                log.Printf("[error] %v - %v \"%v %v\" %v %v", getIPAddress(r), user, r.Method, r.URL.Path, 500, err.Error())
                 w.WriteHeader(500)
                 //go a.SetAction(action, r.Method, 500, err)
                 return
@@ -506,7 +532,8 @@ func (a *ApiEtcd) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
         data, err := json.Marshal(resp)
         if err != nil {
-            log.Printf("[error] %v (%v)", err, r.URL.Path)
+            if user == "" { user = "-" }
+            log.Printf("[error] %v - %v \"%v %v\" %v %v", getIPAddress(r), user, r.Method, r.URL.Path, 500, err.Error())
             w.WriteHeader(500)
             //go a.SetAction(action, r.Method, 500, err)
             return
@@ -522,13 +549,15 @@ func (a *ApiEtcd) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
         opts := &client.SetOptions{}
 
-        if params["dir"] == "true" {
+        if strings.ToLower(params["dir"]) == "true" {
             opts.Dir = true
         }
 
         resp, err := kapi.Set(context.Background(), path, params["value"], opts)
         if err != nil {
             code, err := errorResp(err)
+            if user == "" { user = "-" }
+            log.Printf("[error] %v - %v \"%v %v\" %v %v", getIPAddress(r), user, r.Method, r.URL.Path, code, err.Error())
             w.WriteHeader(code)
             w.Write(encodeResp(&errResp{Error:code, Message:err.Error(), Cause: path}))
             //go a.SetAction(action, r.Method, code, err)
@@ -537,7 +566,8 @@ func (a *ApiEtcd) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
         data, err := json.Marshal(resp)
         if err != nil {
-            log.Printf("[error] %v (%v)", err, r.URL.Path)
+            if user == "" { user = "-" }
+            log.Printf("[error] %v - %v \"%v %v\" %v %v", getIPAddress(r), user, r.Method, r.URL.Path, 500, err.Error())
             w.WriteHeader(500)
             //go a.SetAction(action, r.Method, 500, err)
             return
@@ -553,13 +583,15 @@ func (a *ApiEtcd) ServeHTTP(w http.ResponseWriter, r *http.Request) {
         kapi := client.NewKeysAPI(*a.WriteClient)
 
         opts := &client.DeleteOptions{}
-        if r.URL.Query().Get("recursive") == "true" {
+        if strings.ToLower(r.URL.Query().Get("recursive")) == "true" {
             opts.Recursive = true
         }
 
         resp, err := kapi.Delete(context.Background(), path, opts)
         if err != nil {
             code, err := errorResp(err)
+            if user == "" { user = "-" }
+            log.Printf("[error] %v - %v \"%v %v\" %v %v", getIPAddress(r), user, r.Method, r.URL.Path, code, err.Error())
             w.WriteHeader(code)
             w.Write(encodeResp(&errResp{Error:code, Message:err.Error(), Cause: path}))
             //go a.SetAction(action, r.Method, code, err)
@@ -568,7 +600,8 @@ func (a *ApiEtcd) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
         data, err := json.Marshal(resp)
         if err != nil {
-            log.Printf("[error] %v (%v)", err, r.URL.Path)
+            if user == "" { user = "-" }
+            log.Printf("[error] %v - %v \"%v %v\" %v %v", getIPAddress(r), user, r.Method, r.URL.Path, 500, err.Error())
             w.WriteHeader(500)
             //go a.SetAction(action, r.Method, 500, err)
             return

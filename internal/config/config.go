@@ -20,10 +20,10 @@ type Config struct {
 type Global struct {
     CertFile       string                  `yaml:"cert_file"`
     CertKey        string                  `yaml:"cert_key"`
-    Users          GlobUsers               `yaml:"users"`
+    Users          []UserInfo              `yaml:"users"`
 }
 
-type GlobUsers map[string]string
+//type GlobUsers map[string]string
 
 type Logger struct {
     Urls           []string                `yaml:"urls"`
@@ -36,8 +36,7 @@ type Backend struct {
     Nodes          []string                `yaml:"nodes"`
     Write          Attributes              `yaml:"write"`
     Read           Attributes              `yaml:"read"`
-    Checks         map[string][]*Scheme    `yaml:"checks"`
-    //Users          map[string]string        
+    Checks         map[string][]*Scheme    `yaml:"checks"`     
     Cache          bool                    `yaml:"cache"`   
     CertFile       string                  `yaml:"cert_file"` 
     CertKey        string                  `yaml:"cert_key"` 
@@ -57,7 +56,7 @@ type Scheme struct {
     Dir            string                  `yaml:"dir"`
 }
 
-type Users map[string]string
+type Users map[string]UserInfo
 
 type Attributes struct {
     Username       string                  `yaml:"username"`
@@ -67,6 +66,7 @@ type Attributes struct {
 type UserInfo struct {
     Username       string                  `yaml:"username"`
     Password       string                  `yaml:"password"`
+    ErrCode        int                     `yaml:"err_code"`
 }
 
 type Action struct {
@@ -91,28 +91,19 @@ func getEnv(value string) string {
     return value
 }
 
+func getUser(cfg *Config, name string) (UserInfo, bool) {
+    for _, info := range cfg.Global.Users {
+        if info.Username == name {
+            return info, true
+        }
+    }
+    return UserInfo{}, false
+}
+
 func GetHash(data []byte) string {
     hsh := md5.New()
     hsh.Write(data)
     return hex.EncodeToString(hsh.Sum(nil))
-}
-
-func (u *GlobUsers) UnmarshalYAML(unmarshal func(interface{}) error) error {
-    // Временная структура для чтения массива
-    var users []UserInfo
-    if err := unmarshal(&users); err != nil {
-        return err
-    }
-
-    // Создаем карту и заполняем её
-    result := make(map[string]string)
-    for _, usr := range users {
-        usr.Username = getEnv(usr.Username)
-        usr.Password = getEnv(usr.Password)
-        result[usr.Username] = usr.Password
-    }
-    *u = result
-    return nil
 }
 
 func (u *Users) UnmarshalYAML(unmarshal func(interface{}) error) error {
@@ -123,9 +114,9 @@ func (u *Users) UnmarshalYAML(unmarshal func(interface{}) error) error {
     }
 
     // Создаем карту и заполняем её
-    result := make(map[string]string)
+    result := make(map[string]UserInfo)
     for _, item := range arr {
-        result[item] = ""
+        result[item] = UserInfo{}
     }
     *u = result
     return nil
@@ -143,18 +134,12 @@ func LoadConfigFile(filename string) (*Config, error) {
         return cfg, err
     }
 
-    //for u, usr := range cfg.Global.Users {
-    //    cfg.Global.Users[u].Username = getEnv(usr.Username)
-    //    cfg.Global.Users[u].Password = getEnv(usr.Password)
-    //}
+    for u, usr := range cfg.Global.Users {
+        cfg.Global.Users[u].Username = getEnv(usr.Username)
+        cfg.Global.Users[u].Password = getEnv(usr.Password)
+    }
 
     for b, backend := range cfg.Backends {
-        //cfg.Backends[b].Users = map[string]string{}
-
-        //for _, usr := range cfg.Global.Users {
-        //    cfg.Backends[b].Users[usr.Username] = usr.Password
-        //}
-
         cfg.Backends[b].Read.Username = getEnv(backend.Read.Username)
         cfg.Backends[b].Read.Password = getEnv(backend.Read.Password)
         cfg.Backends[b].Write.Username = getEnv(backend.Write.Username)
@@ -177,8 +162,8 @@ func LoadConfigFile(filename string) (*Config, error) {
                     check.ReRegexp = re
                 }
                 for u, _ := range check.Users {
-                    if pass, ok := cfg.Global.Users[u]; ok {
-                        check.Users[u] = pass
+                    if info, ok := getUser(cfg, u); ok {
+                        check.Users[u] = info
                     }
                 }
             }

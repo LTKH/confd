@@ -4,6 +4,7 @@ global:
   users:
     - username:     "test"
       password:     "test"
+      err_code:     200
     - username:     "test1"
       password:     "test1"
 
