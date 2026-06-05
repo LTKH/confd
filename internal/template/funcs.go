@@ -305,3 +305,117 @@ func concat[T any](slices ...[]T) []T {
     }
     return result
 }
+
+func deepCopy(src interface{}) interface{} {
+    if src == nil {
+        return nil
+    }
+
+    // Используем рефлексию для определения типа
+    srcVal := reflect.ValueOf(src)
+
+    switch srcVal.Kind() {
+    case reflect.Ptr:
+        if srcVal.IsNil() {
+            return nil
+        }
+        // Создаем новый указатель и рекурсивно копируем содержимое
+        newPtr := reflect.New(srcVal.Type().Elem())
+        val := deepCopy(srcVal.Elem().Interface())
+        newPtr.Elem().Set(reflect.ValueOf(val))
+        return newPtr.Interface()
+
+    case reflect.Map:
+        if srcVal.IsNil() {
+            return nil
+        }
+        // Создаем новую карту
+        newMap := reflect.MakeMap(srcVal.Type())
+        for _, key := range srcVal.MapKeys() {
+            val := srcVal.MapIndex(key)
+            newMap.SetMapIndex(key, reflect.ValueOf(deepCopy(val.Interface())))
+        }
+        return newMap.Interface()
+
+    case reflect.Slice:
+        if srcVal.IsNil() {
+            return nil
+        }
+        // Создаем новый слайс
+        newSlice := reflect.MakeSlice(srcVal.Type(), srcVal.Len(), srcVal.Cap())
+        for i := 0; i < srcVal.Len(); i++ {
+            val := srcVal.Index(i)
+            newSlice.Index(i).Set(reflect.ValueOf(deepCopy(val.Interface())))
+        }
+        return newSlice.Interface()
+
+    case reflect.Struct:
+        // Для структур проще всего использовать копирование по значению через интерфейс,
+        // если в них нет вложенных ссылочных типов.
+        // Sprig для структур часто полагается на аналогичную рекурсию по полям.
+        return src 
+
+    default:
+        // Базовые типы (int, string и т.д.) копируются по значению автоматически
+        return src
+    }
+}
+
+func set(m map[string]interface{}, key string, value interface{}) map[string]interface{} {
+    m[key] = value
+    return m
+}
+
+func getValueByPath(path string, obj interface{}) string {
+    parts := strings.Split(path, ".")
+    v := reflect.ValueOf(obj)
+
+    for _, part := range parts {
+        // Обработка указателей
+        for v.Kind() == reflect.Ptr || v.Kind() == reflect.Interface {
+            v = v.Elem()
+        }
+
+        if v.Kind() == reflect.Map {
+            v = v.MapIndex(reflect.ValueOf(part))
+        } else if v.Kind() == reflect.Struct {
+            v = v.FieldByName(part)
+        } else {
+            return ""
+        }
+
+        if !v.IsValid() {
+            return ""
+        }
+    }
+
+    // Если конечный результат — массив или срез
+    if v.Kind() == reflect.Slice || v.Kind() == reflect.Array {
+        var strParts []string
+        for i := 0; i < v.Len(); i++ {
+            // Превращаем каждый элемент в строку и добавляем в список
+            strParts = append(strParts, fmt.Sprintf("%v", v.Index(i).Interface()))
+        }
+        // Объединяем через ":"
+        return strings.Join(strParts, ":")
+    }
+
+    return fmt.Sprintf("%v", v.Interface())
+}
+
+func sortByPath(path string, list []interface{}) []interface{} {
+    if len(list) <= 1 {
+        return list
+    }
+
+    result := make([]interface{}, len(list))
+    copy(result, list)
+
+    sort.SliceStable(result, func(i, j int) bool {
+        valI := getValueByPath(path, result[i])
+        valJ := getValueByPath(path, result[j])
+        return valI < valJ
+    })
+
+    return result
+}

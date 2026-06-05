@@ -54,6 +54,8 @@ type Scheme struct {
     Schema         string                  `yaml:"schema"`
     Users          Users                   `yaml:"users"`
     Dir            string                  `yaml:"dir"`
+    Continue       bool                    `yaml:"continue"`
+    SkipCont       bool                    `yaml:"skip_cont"`
 }
 
 type Users map[string]UserInfo

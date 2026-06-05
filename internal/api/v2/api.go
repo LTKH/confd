@@ -71,43 +71,97 @@ func encodeResp(resp *errResp) []byte {
     return jsn
 }
 
-func getAllowedNodes(nodes client.Nodes, checks []*config.Scheme, user, pass string) client.Nodes {
+func backendChecks(backend *config.Backend, params map[string]string, path, user, pass, method string) (int, error) {
+    proceed := false
+    
+    for _, check := range backend.Checks[method] {
+        err_code := 400;
+
+        if check.Continue && proceed {
+            continue
+        }
+        if check.Path != "" {
+            if !check.RePath.MatchString(path){
+                continue
+            }
+        }
+        if check.Pattern != "" {
+            if matched, _ := filepath.Match(check.Pattern, path); !matched {
+                continue
+            }
+        }
+        if len(check.Users) > 0 {
+            usr, ok := check.Users[user]
+            if !ok || usr.Password != pass {
+                return 403, errors.New("Access is denied")
+            }
+            if usr.ErrCode != 0 {
+                err_code = usr.ErrCode
+            }
+        }
+        if method == "put" || method == "post" {
+            if check.Dir == "true" && params["dir"] != "true" {
+                return err_code, errors.New("Invalid parameter type: Directory expected")
+            }
+
+            if check.Dir == "false" && params["dir"] == "true" {
+                return err_code, errors.New("Invalid parameter type: Not directory expected")
+            }
+
+            if check.Regexp != "" {
+                if params["dir"] != "true" && !check.ReRegexp.MatchString(params["value"]){
+                    return err_code, errors.New("Invalid parameter value")
+                }
+                if params["dir"] == "true" && !check.ReRegexp.MatchString(params["dir"]){
+                    return err_code, errors.New("Invalid parameter name")
+                }
+            }
+
+            if check.Schema != "" {
+                schema := gojsonschema.NewReferenceLoader(check.Schema)
+                document := gojsonschema.NewStringLoader(params["value"])
+
+                result, err := gojsonschema.Validate(schema, document)
+                if err != nil {
+                    return err_code, err
+                }
+
+                if !result.Valid() {
+                    for _, desc := range result.Errors() {
+                        return err_code, errors.New(desc.String())
+                    }
+                }
+            }
+        }
+        if check.SkipCont {
+            proceed = true
+        }
+        if check.Continue {
+            continue
+        }
+        break
+    }
+
+    return 0, nil
+}
+
+func getAllowedNodes(backend *config.Backend, nodes client.Nodes, user, pass, method string) client.Nodes {
     var nnodes client.Nodes
+    
     for _, node := range nodes {
 
-        allowed := false
-        for _, check := range checks {
-            if check.Path != "" {
-                if !check.RePath.MatchString(node.Key){
-                    continue
-                }
-            }
-            if check.Pattern != "" {
-                if matched, _ := filepath.Match(check.Pattern, node.Key); !matched {
-                    continue
-                }
-            }
-            if len(check.Users) > 0 {
-                if ps, ok := check.Users[user]; !ok || ps.Password != pass {
-                    continue
-                }
-            }
-            
-            allowed = true
-            //log.Printf("path: %v, users: %v, user: %v, pass: %v", check.Path, check.Users, user, pass)
-            //log.Printf("node: %v", node.Key)
-            break
-        }
+        params := map[string]string{}
+        code, _ := backendChecks(backend, params, node.Key, user, pass, method)
 
-        if allowed {
-            node.Nodes = getAllowedNodes(node.Nodes, checks, user, pass)
+        if code == 0 {
+            node.Nodes = getAllowedNodes(backend, node.Nodes, user, pass, method)
             nnodes = append(nnodes, node)
         }
     }
 
-    //if len(nnodes) == 0 {
-    //    return make(client.Nodes, 0)
-    //}
+    if len(nnodes) == 0 {
+        return make(client.Nodes, 0)
+    }
 
     return nnodes
 }
@@ -185,70 +239,6 @@ func parseForm(r *http.Request) (map[string]string, error) {
     }
 
     return result, nil
-}
-
-func backendChecks(backend *config.Backend, params map[string]string, path, user, pass, method string) (int, error) {
-    for _, check := range backend.Checks[method] {
-        err_code := 400;
-
-        if check.Path != "" {
-            if !check.RePath.MatchString(path){
-                continue
-            }
-        }
-        if check.Pattern != "" {
-            if matched, _ := filepath.Match(check.Pattern, path); !matched {
-                continue
-            }
-        }
-        if len(check.Users) > 0 {
-            usr, ok := check.Users[user]
-            if !ok || usr.Password != pass {
-                return 403, errors.New("Access is denied")
-            }
-            if usr.ErrCode != 0 {
-                err_code = usr.ErrCode
-            }
-        }
-        
-        if method == "put" || method == "post" {
-            if check.Dir == "true" && params["dir"] != "true" {
-                return err_code, errors.New("Invalid parameter type: Directory expected")
-            }
-
-            if check.Dir == "false" && params["dir"] == "true" {
-                return err_code, errors.New("Invalid parameter type: Not directory expected")
-            }
-
-            if check.Regexp != "" {
-                if params["dir"] != "true" && !check.ReRegexp.MatchString(params["value"]){
-                    return err_code, errors.New("Invalid parameter value")
-                }
-                if params["dir"] == "true" && !check.ReRegexp.MatchString(params["dir"]){
-                    return err_code, errors.New("Invalid parameter name")
-                }
-            }
-
-            if check.Schema != "" {
-                schema := gojsonschema.NewReferenceLoader(check.Schema)
-                document := gojsonschema.NewStringLoader(params["value"])
-
-                result, err := gojsonschema.Validate(schema, document)
-                if err != nil {
-                    return err_code, err
-                }
-
-                if !result.Valid() {
-                    for _, desc := range result.Errors() {
-                        return err_code, errors.New(desc.String())
-                    }
-                }
-            }
-        }
-        break
-    }
-
-    return 0, nil
 }
 
 func GetEtcdClient(backend config.Backend, logger config.Logger) (*ApiEtcd, error) {
@@ -456,17 +446,17 @@ func (a *ApiEtcd) ServeHTTP(w http.ResponseWriter, r *http.Request) {
         return
     }
 
-    code, err := backendChecks(a.Backend, params, path, user, pass, strings.ToLower(r.Method))
-    if err != nil {
-        if user == "" { user = "-" }
-        log.Printf("[error] %v - %v \"%v %v\" %v %v", getIPAddress(r), user, r.Method, r.URL.Path, code, err.Error())
-        w.WriteHeader(code)
-        w.Write(encodeResp(&errResp{Error:code, Message:err.Error(), Cause: path}))
-        //go a.SetAction(action, r.Method, code, err)
-        return
-    }
-
     if r.Method == http.MethodGet {
+
+        code, err := backendChecks(a.Backend, params, path, user, pass, strings.ToLower(r.Method))
+        if err != nil {
+            if user == "" { user = "-" }
+            log.Printf("[error] %v - %v \"%v %v\" %v %v", getIPAddress(r), user, r.Method, r.URL.Path, code, err.Error())
+            w.WriteHeader(code)
+            w.Write(encodeResp(&errResp{Error:code, Message:err.Error(), Cause: path}))
+            //go a.SetAction(action, r.Method, code, err)
+            return
+        }
 
         kapi := client.NewKeysAPI(*a.ReadClient)
         resp := &client.Response{}
@@ -504,7 +494,7 @@ func (a *ApiEtcd) ServeHTTP(w http.ResponseWriter, r *http.Request) {
             }
         }
 
-        resp.Node.Nodes = getAllowedNodes(resp.Node.Nodes, a.Backend.Checks["get"], user, pass)
+        resp.Node.Nodes = getAllowedNodes(a.Backend, resp.Node.Nodes, user, pass, strings.ToLower(r.Method))
 
         if r.Header.Get("X-Custom-Format") == "confd" {
             jsn := getEtcdNodes(resp.Node.Nodes)
@@ -545,6 +535,16 @@ func (a *ApiEtcd) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
     if r.Method == http.MethodPut {
 
+        code, err := backendChecks(a.Backend, params, path, user, pass, strings.ToLower(r.Method))
+        if err != nil {
+            if user == "" { user = "-" }
+            log.Printf("[error] %v - %v \"%v %v\" %v %v", getIPAddress(r), user, r.Method, r.URL.Path, code, err.Error())
+            w.WriteHeader(code)
+            w.Write(encodeResp(&errResp{Error:code, Message:err.Error(), Cause: path}))
+            //go a.SetAction(action, r.Method, code, err)
+            return
+        }
+
         kapi := client.NewKeysAPI(*a.WriteClient)
 
         opts := &client.SetOptions{}
@@ -579,6 +579,16 @@ func (a *ApiEtcd) ServeHTTP(w http.ResponseWriter, r *http.Request) {
     }
 
     if r.Method == http.MethodDelete {
+
+        code, err := backendChecks(a.Backend, params, path, user, pass, strings.ToLower(r.Method))
+        if err != nil {
+            if user == "" { user = "-" }
+            log.Printf("[error] %v - %v \"%v %v\" %v %v", getIPAddress(r), user, r.Method, r.URL.Path, code, err.Error())
+            w.WriteHeader(code)
+            w.Write(encodeResp(&errResp{Error:code, Message:err.Error(), Cause: path}))
+            //go a.SetAction(action, r.Method, code, err)
+            return
+        }
 
         kapi := client.NewKeysAPI(*a.WriteClient)
 

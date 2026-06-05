@@ -62,6 +62,9 @@ func New(name string) *Template {
         "fromJsonArray":   fromJsonArray,
         "coalesce":        coalesce,
         "concat":          concat[any],
+        "deepCopy":        deepCopy,
+        "set":             set,
+        "sortByPath":      sortByPath,
     }
 
     t.name = filepath.Base(name)
