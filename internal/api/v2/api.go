@@ -71,11 +71,11 @@ func encodeResp(resp *errResp) []byte {
     return jsn
 }
 
-func backendChecks(backend *config.Backend, params map[string]string, path, user, pass, method string) (int, error) {
+func backendChecks(backend *config.Backend, params map[string]string, path, user, pass, method string) (int, int, error) {
     proceed := false
     
     for _, check := range backend.Checks[method] {
-        err_code := 400;
+        code := 400;
 
         if check.Continue && proceed {
             continue
@@ -86,34 +86,34 @@ func backendChecks(backend *config.Backend, params map[string]string, path, user
             }
         }
         if check.Pattern != "" {
-            if matched, _ := filepath.Match(check.Pattern, path); !matched {
+            if matched, _ := filepath.Match(check.Pattern, path); !matched { 
                 continue
             }
         }
         if len(check.Users) > 0 {
             usr, ok := check.Users[user]
             if !ok || usr.Password != pass {
-                return 403, errors.New("Access is denied")
+                return 403, 403, errors.New("Access is denied")
             }
             if usr.ErrCode != 0 {
-                err_code = usr.ErrCode
+                code = usr.ErrCode
             }
         }
         if method == "put" || method == "post" {
             if check.Dir == "true" && params["dir"] != "true" {
-                return err_code, errors.New("Invalid parameter type: Directory expected")
+                return 400, 400, errors.New("Invalid parameter type: Directory expected")
             }
 
             if check.Dir == "false" && params["dir"] == "true" {
-                return err_code, errors.New("Invalid parameter type: Not directory expected")
+                return 400, 400, errors.New("Invalid parameter type: Not directory expected")
             }
 
             if check.Regexp != "" {
                 if params["dir"] != "true" && !check.ReRegexp.MatchString(params["value"]){
-                    return err_code, errors.New("Invalid parameter value")
+                    return code, 400, errors.New("Invalid parameter value")
                 }
                 if params["dir"] == "true" && !check.ReRegexp.MatchString(params["dir"]){
-                    return err_code, errors.New("Invalid parameter name")
+                    return code, 400, errors.New("Invalid parameter name")
                 }
             }
 
@@ -123,12 +123,12 @@ func backendChecks(backend *config.Backend, params map[string]string, path, user
 
                 result, err := gojsonschema.Validate(schema, document)
                 if err != nil {
-                    return err_code, err
+                    return code, 400, err
                 }
 
                 if !result.Valid() {
                     for _, desc := range result.Errors() {
-                        return err_code, errors.New(desc.String())
+                        return code, 400, errors.New(desc.String())
                     }
                 }
             }
@@ -142,25 +142,21 @@ func backendChecks(backend *config.Backend, params map[string]string, path, user
         break
     }
 
-    return 0, nil
+    return 0, 0, nil
 }
 
 func getAllowedNodes(backend *config.Backend, nodes client.Nodes, user, pass, method string) client.Nodes {
     var nnodes client.Nodes
-    
+
     for _, node := range nodes {
 
         params := map[string]string{}
-        code, _ := backendChecks(backend, params, node.Key, user, pass, method)
+        code, _, _ := backendChecks(backend, params, node.Key, user, pass, method)
 
         if code == 0 {
             node.Nodes = getAllowedNodes(backend, node.Nodes, user, pass, method)
             nnodes = append(nnodes, node)
         }
-    }
-
-    if len(nnodes) == 0 {
-        return make(client.Nodes, 0)
     }
 
     return nnodes
@@ -448,12 +444,12 @@ func (a *ApiEtcd) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
     if r.Method == http.MethodGet {
 
-        code, err := backendChecks(a.Backend, params, path, user, pass, strings.ToLower(r.Method))
+        code, errCode, err := backendChecks(a.Backend, params, path, user, pass, strings.ToLower(r.Method))
         if err != nil {
             if user == "" { user = "-" }
             log.Printf("[error] %v - %v \"%v %v\" %v %v", getIPAddress(r), user, r.Method, r.URL.Path, code, err.Error())
             w.WriteHeader(code)
-            w.Write(encodeResp(&errResp{Error:code, Message:err.Error(), Cause: path}))
+            w.Write(encodeResp(&errResp{Error:errCode, Message:err.Error(), Cause: path}))
             //go a.SetAction(action, r.Method, code, err)
             return
         }
@@ -535,12 +531,12 @@ func (a *ApiEtcd) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
     if r.Method == http.MethodPut {
 
-        code, err := backendChecks(a.Backend, params, path, user, pass, strings.ToLower(r.Method))
+        code, errCode, err := backendChecks(a.Backend, params, path, user, pass, strings.ToLower(r.Method))
         if err != nil {
             if user == "" { user = "-" }
             log.Printf("[error] %v - %v \"%v %v\" %v %v", getIPAddress(r), user, r.Method, r.URL.Path, code, err.Error())
             w.WriteHeader(code)
-            w.Write(encodeResp(&errResp{Error:code, Message:err.Error(), Cause: path}))
+            w.Write(encodeResp(&errResp{Error:errCode, Message:err.Error(), Cause: path}))
             //go a.SetAction(action, r.Method, code, err)
             return
         }
@@ -580,12 +576,12 @@ func (a *ApiEtcd) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
     if r.Method == http.MethodDelete {
 
-        code, err := backendChecks(a.Backend, params, path, user, pass, strings.ToLower(r.Method))
+        code, errCode, err := backendChecks(a.Backend, params, path, user, pass, strings.ToLower(r.Method))
         if err != nil {
             if user == "" { user = "-" }
             log.Printf("[error] %v - %v \"%v %v\" %v %v", getIPAddress(r), user, r.Method, r.URL.Path, code, err.Error())
             w.WriteHeader(code)
-            w.Write(encodeResp(&errResp{Error:code, Message:err.Error(), Cause: path}))
+            w.Write(encodeResp(&errResp{Error:errCode, Message:err.Error(), Cause: path}))
             //go a.SetAction(action, r.Method, code, err)
             return
         }
