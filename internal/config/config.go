@@ -42,6 +42,7 @@ type Backend struct {
     CertKey        string                  `yaml:"cert_key"` 
     TrustedCaFile  string                  `yaml:"trusted_ca_file"`
     UseSSL         bool                    `yaml:"use_ssl"`
+    Debug          bool                    `yaml:"debug"`
 }
 
 type Scheme struct {

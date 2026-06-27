@@ -15,7 +15,8 @@ logger:
 backends:
   - backend:        "etcd"
     id:             "etcd"
-    cache:          false
+    cache:          true
+    debug:          true
     nodes:          ["http://127.0.0.1:2379"]
     read:
       username:     ""
@@ -26,25 +27,25 @@ backends:
     checks:
       get:
         - path:       "^/$"
-          users:      ["test"]
-        - path:       "^(/ps|/ps/hosts|/ps/hosts/test04)$"
-          users:      ["test"]
-        - path:       "^/ps/hosts/test04/test-host342$"
-          users:      ["test"]
-        - path:       "^/ps/hosts/test04/test-host342.*"
-          users:      ["test"]
+          users:      [""]
+        - path:       "^/ps$"
+          users:      ["test","test1",""]
+        - path:       "^/ps/hosts$"
+          users:      ["test","test1",""]
+        - path:       "^/ps/hosts/test50"
+          users:      ["test",""]
+        - path:       "^/ps/hosts/test60"
+          users:      ["test1"]
+        - path:       ".*"
+          users:      [""]
       put:
-        - pattern:    "*"
-          path:       ".*"
-          regexp:     ""
+        - path:       ".*"
+          #regexp:     ""
           #schema:     "file:///Users/dmitry/Documents/github/confd/config/schema.json"
           users:      ["test","test1"]
       delete:
-        - pattern:    "*"
-          path:       ".*"
-          regexp:     ""
-          schema:     ""
-          users:      ["test","test1"]
+        - path:       ".*"
+          users:      ["test","test1",""]
 
   #- backend:        "consul"
   #  id:             "consul"

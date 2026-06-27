@@ -170,7 +170,7 @@ func (t *HTTPTemplate) CreateTemplate(httpClient *client.HttpClient, path, plugi
     }
 
     httpConfig := client.HttpConfig{
-        URLs: randURLs(t.URLs),
+        URLs: t.URLs,
         ContentEncoding: t.ContentEncoding,
         Username: t.Username,
         Password: t.Password,
@@ -312,7 +312,11 @@ func loadConfigFile(file string, dcrpt bool) (Config, error) {
 
     f.Close()
 
+    cfg.Global.URLs = randURLs(cfg.Global.URLs)
+
     for i, tmpl := range cfg.Templates {
+        cfg.Templates[i].URLs = randURLs(tmpl.URLs)
+
         if dcrpt && tmpl.Password != "" {
             passwd, err := decrypt(tmpl.Password)
             if err != nil {

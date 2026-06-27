@@ -6,6 +6,7 @@ import (
     "log"
     "net/http"
     "net/url"
+    "sync"
     "time"
     "bytes"
     "regexp"
@@ -16,14 +17,15 @@ import (
     "crypto/x509"
     "encoding/json"
     "path/filepath"
-    //"github.com/coreos/etcd/client"
     "go.etcd.io/etcd/client/v2"
+    "github.com/mohae/deepcopy"
     "github.com/xeipuuv/gojsonschema"
     "github.com/ltkh/confd/internal/config"
 )
 
 var (
     keyRegexp = regexp.MustCompile(`.*/([^/]+)$`)
+    store = newStore()
 )
 
 type ApiEtcd struct {
@@ -32,6 +34,7 @@ type ApiEtcd struct {
     WriteClient   *client.Client
     Backend       *config.Backend
     Actions       chan *config.Action
+    Debug         bool
 }
 
 type errResp struct {
@@ -47,6 +50,20 @@ type PutRequest struct {
 
 type Actions struct {
     Array         []config.Action          `json:"actions"`
+}
+
+type Store struct {
+    Lock           sync.RWMutex
+    Root           *client.Node
+    Index          map[string]*client.Node
+}
+
+type Options struct {
+	Recursive      bool
+	Sort           bool
+	Quorum         bool
+    Wait           bool
+    Dir            bool
 }
 
 func getIPAddress(r *http.Request) string {
@@ -73,6 +90,10 @@ func encodeResp(resp *errResp) []byte {
 
 func backendChecks(backend *config.Backend, params map[string]string, path, user, pass, method string) (int, int, error) {
     proceed := false
+
+    if _, ok := backend.Checks[method]; !ok {
+        return 405, 405, errors.New("Method Not Allowed")
+    }
     
     for _, check := range backend.Checks[method] {
         code := 400;
@@ -237,6 +258,123 @@ func parseForm(r *http.Request) (map[string]string, error) {
     return result, nil
 }
 
+func getTree(nodePath string) (keys []string) {
+    array := strings.Split(nodePath, "/")
+
+    for i := 0; i < len(array); i++ {
+        k := strings.Join(array[:i+1], "/")
+        if k == "/" { continue }
+        keys = append(keys, k)
+    }
+
+    return keys
+}
+
+func removeIndex(s []*client.Node, index int) []*client.Node {
+    return append(s[:index], s[index+1:]...)
+}
+
+func newStore() *Store {
+    s := new(Store)
+    s.Root = &client.Node{Key:"", Dir:true}
+    return s
+}
+
+func (s *Store) Update(action string, node *client.Node) error {
+    keys := getTree(node.Key)
+     
+    s.Lock.Lock()
+    defer s.Lock.Unlock()
+
+    nd := s.Root
+
+    switch action {
+    case "set":
+        for k, key := range keys {
+            if k == 0 && key == "" {
+                continue
+            }
+
+            exists := false
+            for i, n := range nd.Nodes {
+                if n.Key == key {
+                    if k == len(keys)-1 {
+                        nd.Nodes[i] = node
+                    }
+                    nd = nd.Nodes[i]
+                    exists = true
+                    continue
+                }
+            }
+
+            if !exists {
+                if k == len(keys)-1 {
+                    nd.Nodes = append(nd.Nodes, node)
+                } else {
+                    nd.Nodes = append(nd.Nodes, &client.Node{
+                        Key:           key,
+                        Dir:           true,
+                        CreatedIndex:  0,
+                        ModifiedIndex: 0,
+                    })
+                }
+                nd = nd.Nodes[len(nd.Nodes)-1]
+            }
+        }
+    case "delete":
+        for k, key := range keys {
+            if k == 0 && key == "" {
+                continue
+            }
+
+            for i, n := range nd.Nodes {
+                if n.Key == key {
+                    if k == len(keys)-1 {
+                        nd.Nodes = removeIndex(nd.Nodes, i)
+                        return nil
+                    }
+                    nd = nd.Nodes[i]
+                    continue
+                }
+            }
+        }
+    }
+     
+    return nil
+}
+
+func (s *Store) GetCache(path string) (*client.Node, bool) {   
+    keys := getTree(path)
+
+    s.Lock.RLock()
+    defer s.Lock.RUnlock()
+
+    //nd := &client.Node{}
+    //copy(nd, s.Root)
+    nd := deepcopy.Copy(s.Root).(*client.Node) 
+    
+    for _, key := range keys {
+        if key == "" {
+            continue
+        }
+
+        exists := false
+        for i, n := range nd.Nodes {
+            if n.Key == key {
+                nd = nd.Nodes[i]
+                exists = true
+                continue
+            }
+        }
+
+        if !exists || (nd.CreatedIndex == 0 && nd.ModifiedIndex == 0) {
+            return nd, false
+        }
+    }
+ 
+    return nd, true
+}
+
 func GetEtcdClient(backend config.Backend, logger config.Logger) (*ApiEtcd, error) {
 
     // DefaultTransport
@@ -284,25 +422,28 @@ func GetEtcdClient(backend config.Backend, logger config.Logger) (*ApiEtcd, erro
     if backend.Cache == true {
         kapi := client.NewKeysAPI(readClient)
 
+        // Заполняем cache
+        resp, err := kapi.Get(context.Background(), "/", &client.GetOptions{ Recursive: true, Sort: true })
+        if err != nil {
+            return nil, err
+        }
+        for _, node := range resp.Node.Nodes {
+            store.Update("set", node)
+        }
+
         // Создаем watcher на ключ или префикс
         watcher := kapi.Watcher("/", &client.WatcherOptions{ Recursive: true })
-
-        // Считываем все данные
-        // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
         // Запускаем цикл получения событий
         go func() {
             for {
                 resp, err := watcher.Next(context.Background())
                 if err != nil {
-                    log.Printf("[error] watcher error: %v", err)
+                    log.Printf("[error] %v", err)
                     time.Sleep(10 * time.Second)
-                    // Считываем все данные
-                    // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
                     continue
                 }
-                log.Printf("[cache] %v: %v", resp.Action, resp.Node.Key)
-                //log.Printf("[cache] %v: %v - %v", resp.Action, resp.Node.Key, resp.Node.Value)
+                store.Update(resp.Action, resp.Node)
             }
         }()
     }
@@ -324,6 +465,7 @@ func GetEtcdClient(backend config.Backend, logger config.Logger) (*ApiEtcd, erro
         WriteClient:   &writeClient,
         Backend:       &backend,
         Actions:       make(chan *config.Action, 1000),
+        Debug:         backend.Debug,
     }
 
     // Send new action
@@ -360,18 +502,6 @@ func GetEtcdClient(backend config.Backend, logger config.Logger) (*ApiEtcd, erro
     return api, nil
 }
 
-func errorResp(err error) (int, error) {
-    //log.Printf("[error] %v", err.Error())
-
-    if strings.Contains(err.Error(), "connect: connection refused") {
-        return 502, errors.New("Etcd cluster is unavailable")
-    } else if strings.Contains(err.Error(), "100: Key not found") {
-        return 404, errors.New("Key not found")
-    }
-
-    return 400, err
-}
-
 func (a *ApiEtcd) SendActions(client *http.Client, actions Actions, urls []string) {
     data, err := json.Marshal(actions)
     if err != nil {
@@ -394,19 +524,28 @@ func (a *ApiEtcd) SendActions(client *http.Client, actions Actions, urls []strin
     return
 }
 
-func (a *ApiEtcd) SetAction(action *config.Action, method string, code int, err error) {
-    if len(a.Actions) < 1000 {
-        if method == http.MethodPut || method == http.MethodDelete {
-            action.Attributes["warnings"] = []string{"action to update a parameter"}
-        }
-        if code != 0 { 
-            action.Attributes["code"] = code 
-        }
-        if err != nil { 
-            action.Attributes["error"] = err.Error() 
-        }
-        a.Actions <- action
+func (a *ApiEtcd) SetAction(tp, user, err, cache string, r *http.Request, code int) {
+    if (a.Debug && tp == "debug") || tp != "debug" {
+        if user == "" { user = "-" }
+        log.Printf("[%s] %s - %s \"%s %s%s\" %v %s", tp, getIPAddress(r), user, r.Method, r.URL.Path, cache, code, err)
     }
+    /*
+    if len(a.Actions) < 1000 {
+        a.Actions <- &config.Action{
+            Login:        user,
+            Action:       "storage request",
+            Object:       r.Header.Get("X-Forwarded-For"),
+            Attributes:   map[string]interface{}{
+                "method": r.Method,
+                "path":   r.URL.Path,
+                "code":   code,
+                "error":  err
+            },
+            Description:  r.URL.Path,
+            Timestamp:    time.Now().UTC().Unix(),
+        }
+    }
+    */
 }
 
 func (a *ApiEtcd) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -414,93 +553,102 @@ func (a *ApiEtcd) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
     path := strings.Replace(r.URL.Path, "/api/v2/"+a.Id, "", 1)
     user, pass, _ := r.BasicAuth()
-
-    action := &config.Action{
-        Login:        user,
-        Action:       "storage request",
-        Attributes:   map[string]interface{}{
-            "method": r.Method,
-            "path":   r.URL.Path,
-        },
-        Description:  path,
-        Timestamp:    time.Now().UTC().Unix(),
-    }
-
-    if r.Header.Get("X-Custom-User") != "" {
-        action.Login = r.Header.Get("X-Custom-User")
-    }
-    if r.Header.Get("X-Forwarded-For") != "" {
-        action.Object = r.Header.Get("X-Forwarded-For")
-    }
+    cache := ""
 
     params, err := parseForm(r)
     if err != nil {
-        log.Printf("[error] %v - %v \"%v %v\" %v %v", getIPAddress(r), user, r.Method, r.URL.Path, 400, err.Error())
+        a.SetAction("error", user, err.Error(), cache, r, 400)
         w.WriteHeader(400)
         w.Write(encodeResp(&errResp{Error:400, Message:err.Error(), Cause: path}))
-        //go a.SetAction(action, r.Method, 400, err)
+        return
+    }
+
+    opts := &Options{}
+    if strings.ToLower(r.URL.Query().Get("recursive")) == "true" {
+        opts.Recursive = true
+    }
+    if strings.ToLower(r.URL.Query().Get("sorted")) == "true" {
+        opts.Sort = true
+    }
+    if strings.ToLower(r.URL.Query().Get("wait")) == "true" {
+        opts.Wait = true
+    }
+    if strings.ToLower(params["dir"]) == "true" {
+        opts.Dir = true
+    }
+
+    code, errCode, err := backendChecks(a.Backend, params, path, user, pass, strings.ToLower(r.Method))
+    if err != nil {
+        a.SetAction("error", user, err.Error(), cache, r, code)
+        w.WriteHeader(code)
+        w.Write(encodeResp(&errResp{Error:errCode, Message:err.Error(), Cause: path}))
         return
     }
 
     if r.Method == http.MethodGet {
-
-        code, errCode, err := backendChecks(a.Backend, params, path, user, pass, strings.ToLower(r.Method))
-        if err != nil {
-            if user == "" { user = "-" }
-            log.Printf("[error] %v - %v \"%v %v\" %v %v", getIPAddress(r), user, r.Method, r.URL.Path, code, err.Error())
-            w.WriteHeader(code)
-            w.Write(encodeResp(&errResp{Error:errCode, Message:err.Error(), Cause: path}))
-            //go a.SetAction(action, r.Method, code, err)
-            return
-        }
-
         kapi := client.NewKeysAPI(*a.ReadClient)
         resp := &client.Response{}
 
-        opts := &client.GetOptions{}
-        if strings.ToLower(r.URL.Query().Get("recursive")) == "true" {
-            opts.Recursive = true
-        }
-        if strings.ToLower(r.URL.Query().Get("sorted")) == "true" {
-            opts.Sort = true
-        }
-
-        if strings.ToLower(r.URL.Query().Get("wait")) == "true" {
+        if opts.Wait {
             // Создаем watcher на ключ или префикс
             watcher := kapi.Watcher(path, &client.WatcherOptions{ Recursive: opts.Recursive })
             resp, err = watcher.Next(context.Background())
             if err != nil {
-                if user == "" { user = "-" }
-                log.Printf("[error] %v - %v \"%v %v\" %v %v", getIPAddress(r), user, r.Method, r.URL.Path, 500, err.Error())
+                a.SetAction("error", user, err.Error(), cache, r, 500)
                 w.WriteHeader(500)
                 w.Write(encodeResp(&errResp{Error:500, Message:err.Error(), Cause: path}))
-                //go a.SetAction(action, r.Method, 500, err)
                 return
             }
-        } else {
-            resp, err = kapi.Get(context.Background(), path, opts)
+        } else if !opts.Recursive || !a.Backend.Cache {
+            resp, err = kapi.Get(context.Background(), path, &client.GetOptions{ Recursive: opts.Recursive, Sort: opts.Sort })
             if err != nil {
-                code, err := errorResp(err)
-                if user == "" { user = "-" }
-                log.Printf("[error] %v - %v \"%v %v\" %v %v", getIPAddress(r), user, r.Method, r.URL.Path, code, err.Error())
-                w.WriteHeader(code)
-                w.Write(encodeResp(&errResp{Error:code, Message:err.Error(), Cause: path}))
-                //go a.SetAction(action, r.Method, code, err)
+                if etcdErr, ok := err.(client.Error); ok {
+                    httpCode := 200
+                    if etcdErr.Code == 100 { httpCode = 404 }
+                    a.SetAction("debug", user, etcdErr.Message, cache, r, httpCode)
+                    w.WriteHeader(httpCode)
+                    w.Write(encodeResp(&errResp{Error:etcdErr.Code, Message:etcdErr.Message, Cause: etcdErr.Cause}))
+                    return
+                }
+                a.SetAction("error", user, err.Error(), cache, r, 500)
+                w.WriteHeader(500)
                 return
+            }
+        } else if opts.Recursive && a.Backend.Cache {
+            node, exists := store.GetCache(path)
+            if !exists {
+                resp, err = kapi.Get(context.Background(), path, &client.GetOptions{ Recursive: opts.Recursive, Sort: opts.Sort })
+                if err != nil {
+                    if etcdErr, ok := err.(client.Error); ok {
+                        httpCode := 200
+                        if etcdErr.Code == 100 { httpCode = 404 }
+                        a.SetAction("debug", user, etcdErr.Message, cache, r, httpCode)
+                        w.WriteHeader(httpCode)
+                        w.Write(encodeResp(&errResp{Error:etcdErr.Code, Message:etcdErr.Message, Cause: etcdErr.Cause}))
+                        return
+                    }
+                    a.SetAction("error", user, err.Error(), cache, r, 500)
+                    w.WriteHeader(500)
+                    return
+                }
+                store.Update("set", resp.Node)
+            } else {
+                cache = " (cache)"
+                resp = &client.Response{ Action: "get", Node: node }
             }
         }
 
+        // Применение ролевой модели ко всему дереву ключей
         resp.Node.Nodes = getAllowedNodes(a.Backend, resp.Node.Nodes, user, pass, strings.ToLower(r.Method))
 
+        // Формирование ответа для агента confd
         if r.Header.Get("X-Custom-Format") == "confd" {
             jsn := getEtcdNodes(resp.Node.Nodes)
 
             data, err := json.Marshal(jsn)
             if err != nil {
-                if user == "" { user = "-" }
-                log.Printf("[error] %v - %v \"%v %v\" %v %v", getIPAddress(r), user, r.Method, r.URL.Path, 500, err.Error())
+                a.SetAction("error", user, err.Error(), cache, r, 500)
                 w.WriteHeader(500)
-                //go a.SetAction(action, r.Method, 500, err)
                 return
             }
 
@@ -510,114 +658,83 @@ func (a *ApiEtcd) ServeHTTP(w http.ResponseWriter, r *http.Request) {
                 return
             }
 
+            a.SetAction("debug", user, "", cache, r, 200)
             w.Header().Set("X-Custom-Hash", hash)
             w.Write(data)
-            //go a.SetAction(action, r.Method, 200, nil)
             return
         }
 
         data, err := json.Marshal(resp)
         if err != nil {
-            if user == "" { user = "-" }
-            log.Printf("[error] %v - %v \"%v %v\" %v %v", getIPAddress(r), user, r.Method, r.URL.Path, 500, err.Error())
+            a.SetAction("error", user, err.Error(), cache, r, 500)
             w.WriteHeader(500)
-            //go a.SetAction(action, r.Method, 500, err)
             return
         }
+
+        a.SetAction("debug", user, "", cache, r, 200)   
         w.Write(data)
-        //go a.SetAction(action, r.Method, 200, nil)        
         return
     }
 
     if r.Method == http.MethodPut {
-
-        code, errCode, err := backendChecks(a.Backend, params, path, user, pass, strings.ToLower(r.Method))
-        if err != nil {
-            if user == "" { user = "-" }
-            log.Printf("[error] %v - %v \"%v %v\" %v %v", getIPAddress(r), user, r.Method, r.URL.Path, code, err.Error())
-            w.WriteHeader(code)
-            w.Write(encodeResp(&errResp{Error:errCode, Message:err.Error(), Cause: path}))
-            //go a.SetAction(action, r.Method, code, err)
-            return
-        }
-
         kapi := client.NewKeysAPI(*a.WriteClient)
 
-        opts := &client.SetOptions{}
-
-        if strings.ToLower(params["dir"]) == "true" {
-            opts.Dir = true
-        }
-
-        resp, err := kapi.Set(context.Background(), path, params["value"], opts)
+        resp, err := kapi.Set(context.Background(), path, params["value"], &client.SetOptions{ Dir: opts.Dir })
         if err != nil {
-            code, err := errorResp(err)
-            if user == "" { user = "-" }
-            log.Printf("[error] %v - %v \"%v %v\" %v %v", getIPAddress(r), user, r.Method, r.URL.Path, code, err.Error())
-            w.WriteHeader(code)
-            w.Write(encodeResp(&errResp{Error:code, Message:err.Error(), Cause: path}))
-            //go a.SetAction(action, r.Method, code, err)
+            if etcdErr, ok := err.(client.Error); ok {
+                httpCode := 200
+                if etcdErr.Code == 102 { httpCode = 400 }
+                a.SetAction("debug", user, etcdErr.Message, cache, r, httpCode)
+                w.Write(encodeResp(&errResp{Error:etcdErr.Code, Message:etcdErr.Message, Cause: etcdErr.Cause}))
+                return
+            }
+            a.SetAction("error", user, err.Error(), cache, r, 500)
+            w.WriteHeader(500)
             return
         } 
 
         data, err := json.Marshal(resp)
         if err != nil {
-            if user == "" { user = "-" }
-            log.Printf("[error] %v - %v \"%v %v\" %v %v", getIPAddress(r), user, r.Method, r.URL.Path, 500, err.Error())
+            a.SetAction("error", user, err.Error(), cache, r, 500)
             w.WriteHeader(500)
-            //go a.SetAction(action, r.Method, 500, err)
             return
         }
-
+        
+        a.SetAction("debug", user, "", cache, r, 200)
+        w.WriteHeader(200)
         w.Write(data)
-        //go a.SetAction(action, r.Method, 200, nil)
         return
     }
 
     if r.Method == http.MethodDelete {
-
-        code, errCode, err := backendChecks(a.Backend, params, path, user, pass, strings.ToLower(r.Method))
-        if err != nil {
-            if user == "" { user = "-" }
-            log.Printf("[error] %v - %v \"%v %v\" %v %v", getIPAddress(r), user, r.Method, r.URL.Path, code, err.Error())
-            w.WriteHeader(code)
-            w.Write(encodeResp(&errResp{Error:errCode, Message:err.Error(), Cause: path}))
-            //go a.SetAction(action, r.Method, code, err)
-            return
-        }
-
         kapi := client.NewKeysAPI(*a.WriteClient)
 
-        opts := &client.DeleteOptions{}
-        if strings.ToLower(r.URL.Query().Get("recursive")) == "true" {
-            opts.Recursive = true
-        }
-
-        resp, err := kapi.Delete(context.Background(), path, opts)
+        resp, err := kapi.Delete(context.Background(), path, &client.DeleteOptions{ Recursive: opts.Recursive })
         if err != nil {
-            code, err := errorResp(err)
-            if user == "" { user = "-" }
-            log.Printf("[error] %v - %v \"%v %v\" %v %v", getIPAddress(r), user, r.Method, r.URL.Path, code, err.Error())
-            w.WriteHeader(code)
-            w.Write(encodeResp(&errResp{Error:code, Message:err.Error(), Cause: path}))
-            //go a.SetAction(action, r.Method, code, err)
+            if etcdErr, ok := err.(client.Error); ok {
+                httpCode := 200
+                if etcdErr.Code == 100 { httpCode = 404 }
+                a.SetAction("debug", user, etcdErr.Message, cache, r, httpCode)
+                w.WriteHeader(httpCode)
+                w.Write(encodeResp(&errResp{Error:etcdErr.Code, Message:etcdErr.Message, Cause: etcdErr.Cause}))
+                return
+            }
+            a.SetAction("error", user, err.Error(), cache, r, 500)
+            w.WriteHeader(500)
             return
         } 
 
         data, err := json.Marshal(resp)
         if err != nil {
-            if user == "" { user = "-" }
-            log.Printf("[error] %v - %v \"%v %v\" %v %v", getIPAddress(r), user, r.Method, r.URL.Path, 500, err.Error())
+            a.SetAction("error", user, err.Error(), cache, r, 500)
             w.WriteHeader(500)
-            //go a.SetAction(action, r.Method, 500, err)
             return
         }
 
+        a.SetAction("debug", user, "", cache, r, 200)
         w.Write(data)
-        //go a.SetAction(action, r.Method, 200, nil)
         return
     }
     
-    w.WriteHeader(405)
-    //go a.SetAction(action, r.Method, 405, nil)
+    w.WriteHeader(204)
 }
