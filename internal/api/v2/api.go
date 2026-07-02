@@ -18,7 +18,6 @@ import (
     "encoding/json"
     "path/filepath"
     "go.etcd.io/etcd/client/v2"
-    "github.com/mohae/deepcopy"
     "github.com/xeipuuv/gojsonschema"
     "github.com/ltkh/confd/internal/config"
 )
@@ -171,12 +170,22 @@ func getAllowedNodes(backend *config.Backend, nodes client.Nodes, user, pass, me
 
     for _, node := range nodes {
 
-        params := map[string]string{}
-        code, _, _ := backendChecks(backend, params, node.Key, user, pass, method)
+        code, _, _ := backendChecks(backend, nil, node.Key, user, pass, method)
 
         if code == 0 {
-            node.Nodes = getAllowedNodes(backend, node.Nodes, user, pass, method)
-            nnodes = append(nnodes, node)
+            // Создаем абсолютно новый объект в памяти (выделяем новый адрес)
+            clonedNode := &client.Node{
+                Key:           node.Key,
+                Dir:           node.Dir,
+                Value:         node.Value,
+                CreatedIndex:  node.CreatedIndex,
+                ModifiedIndex: node.ModifiedIndex,
+                Expiration:    node.Expiration, 
+                TTL:           node.TTL,
+            }
+
+            clonedNode.Nodes = getAllowedNodes(backend, node.Nodes, user, pass, method)
+            nnodes = append(nnodes, clonedNode)
         }
     }
 
@@ -349,9 +358,10 @@ func (s *Store) GetCache(path string) (*client.Node, bool) {
     s.Lock.RLock()
     defer s.Lock.RUnlock()
 
+    nd := s.Root
     //nd := &client.Node{}
     //copy(nd, s.Root)
-    nd := deepcopy.Copy(s.Root).(*client.Node) 
+    //nd := deepcopy.Copy(s.Root).(*client.Node) 
     
     for _, key := range keys {
         if key == "" {
@@ -373,6 +383,17 @@ func (s *Store) GetCache(path string) (*client.Node, bool) {
     }
  
     return nd, true
+}
+
+func StoreUpdate(kapi client.KeysAPI) error {
+    resp, err := kapi.Get(context.Background(), "/", &client.GetOptions{ Recursive: true, Sort: true })
+    if err != nil {
+        return err
+    }
+    for _, node := range resp.Node.Nodes {
+        store.Update("set", node)
+    }
+    return nil
 }
 
 func GetEtcdClient(backend config.Backend, logger config.Logger) (*ApiEtcd, error) {
@@ -423,12 +444,8 @@ func GetEtcdClient(backend config.Backend, logger config.Logger) (*ApiEtcd, erro
         kapi := client.NewKeysAPI(readClient)
 
         // Заполняем cache
-        resp, err := kapi.Get(context.Background(), "/", &client.GetOptions{ Recursive: true, Sort: true })
-        if err != nil {
+        if err := StoreUpdate(kapi); err != nil {
             return nil, err
-        }
-        for _, node := range resp.Node.Nodes {
-            store.Update("set", node)
         }
 
         // Создаем watcher на ключ или префикс
@@ -441,6 +458,7 @@ func GetEtcdClient(backend config.Backend, logger config.Logger) (*ApiEtcd, erro
                 if err != nil {
                     log.Printf("[error] %v", err)
                     time.Sleep(10 * time.Second)
+                    StoreUpdate(kapi)
                     continue
                 }
                 store.Update(resp.Action, resp.Node)
@@ -634,16 +652,16 @@ func (a *ApiEtcd) ServeHTTP(w http.ResponseWriter, r *http.Request) {
                 store.Update("set", resp.Node)
             } else {
                 cache = " (cache)"
-                resp = &client.Response{ Action: "get", Node: node }
+                resp = &client.Response{ Node: node }
             }
         }
 
         // Применение ролевой модели ко всему дереву ключей
-        resp.Node.Nodes = getAllowedNodes(a.Backend, resp.Node.Nodes, user, pass, strings.ToLower(r.Method))
+        nodes := getAllowedNodes(a.Backend, resp.Node.Nodes, user, pass, strings.ToLower(r.Method))
 
         // Формирование ответа для агента confd
         if r.Header.Get("X-Custom-Format") == "confd" {
-            jsn := getEtcdNodes(resp.Node.Nodes)
+            jsn := getEtcdNodes(nodes)
 
             data, err := json.Marshal(jsn)
             if err != nil {
@@ -664,7 +682,7 @@ func (a *ApiEtcd) ServeHTTP(w http.ResponseWriter, r *http.Request) {
             return
         }
 
-        data, err := json.Marshal(resp)
+        data, err := json.Marshal(&client.Response{ Action: "get", Node: &client.Node{ Nodes: nodes }})
         if err != nil {
             a.SetAction("error", user, err.Error(), cache, r, 500)
             w.WriteHeader(500)

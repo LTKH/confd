@@ -33,7 +33,7 @@ backends:
         - path:       "^/ps/hosts$"
           users:      ["test","test1",""]
         - path:       "^/ps/hosts/test50"
-          users:      ["test",""]
+          users:      ["test"]
         - path:       "^/ps/hosts/test60"
           users:      ["test1"]
         - path:       ".*"
